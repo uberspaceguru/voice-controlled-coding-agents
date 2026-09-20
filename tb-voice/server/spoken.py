@@ -5,7 +5,8 @@ spelled. A uuid is "an identifier", a hash "a commit", a path "a file path", a
 URL "a link", a 24+ character token "an identifier", code "some code". This runs
 on everything the manager itself speaks through Gradium; the app applies its own
 copy to what it speaks in a session's voice. Nothing that looks like an id is
-ever read aloud, from any path.
+read aloud on the ordinary summary paths. Explicit exact-value requests use
+a separate validated ExactSpeakFrame; this function remains unchanged.
 """
 
 import re

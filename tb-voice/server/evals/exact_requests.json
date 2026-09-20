@@ -1,0 +1,15 @@
+[
+ {"text":"What directory are you working in?","exact":"directory","intent":"exact_directory"},
+ {"text":"Give me the full directory path.","exact":"directory","intent":"exact_directory"},
+ {"text":"Tranquility, what branch are you on?","exact":"branch","intent":"exact_branch"},
+ {"text":"Read the exact command.","exact":"command","intent":"exact_command"},
+ {"text":"Give me the full session identifier.","exact":"identifier","intent":"exact_identifier"},
+ {"text":"Explain why you chose that directory.","exact":null,"intent":"rung_why"},
+ {"text":"Summarize what happened across all agents today.","exact":null,"intent":"summarize_recent"},
+ {"text":"Open that directory in the browser.","exact":null,"intent":"send_message"},
+ {"text":"Switch to the exact branch main.","exact":null,"intent":"send_message"},
+ {"text":"Run the exact command.","exact":null,"intent":"send_message"},
+ {"text":"Give me the full directory path and delete it.","exact":null,"intent":"send_message"},
+ {"text":"What command did you send to this agent?","exact":null,"intent":"exact_command"},
+ {"text":"Give me the API key.","exact":null,"intent":"custom"}
+]
