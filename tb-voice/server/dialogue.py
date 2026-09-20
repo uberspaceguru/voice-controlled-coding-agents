@@ -237,10 +237,22 @@ class Dialogue:
             act, act_p = "inform", probability(answers, "route", route)
             response = "detail" if route == "rung_why" else "summary"
             target = self._target(answers, 0.55)
+        if (act in {"inform", "correct"} and response.startswith("exact_") and route == response
+                and probability(answers, "route", route) >= 0.75
+                and probability(answers, "response", response) >= 0.80 and execute <= 0.10):
+            # These acts share a read-only outcome. A split between asking and
+            # repairing an exact question must not turn agreement on reading
+            # into silence. Keep correction semantics; this authorizes no work.
+            act_p = probability(answers, "act", "inform") + probability(answers, "act", "correct")
         if addressed < READ_THRESHOLD or act_p < READ_THRESHOLD:
             return Decision("silent", "not_addressed_or_uncertain", epoch=epoch)
         if self.listening == "paused" and route not in {"resume_listening", "stop_speaking", "cancel"} and act != "cancel":
             return Decision("silent", "listening_paused", epoch=epoch)
+
+        if (act in {"inform", "control"} and route == "conversation_resume"
+                and probability(answers, "route", route) >= 0.75):
+            return Decision("answer", "conversation_resume", "detail", text, target or self.stage,
+                            route, epoch=epoch)
 
         if act in {"direct", "inform", "control"} and route in {"invite_next", "teach", "speak", "summarize_recent"}:
             if probability(answers, "route", route) >= 0.75:

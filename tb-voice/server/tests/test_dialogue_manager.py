@@ -50,7 +50,7 @@ def manager():
 class Integration(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.patches = ExitStack()
-        for module in ("manager", "dialogue_manager"):
+        for module in ("manager", "dialogue_manager", "memory_manager"):
             self.patches.enter_context(patch(module + ".emit", AsyncMock()))
         self.patches.enter_context(patch("manager.note"))
         self.run = self.patches.enter_context(patch("tools._run", AsyncMock(return_value=(0, ""))))
@@ -291,6 +291,16 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         await m._turn("What did you send?", None, None)
         self.assertEqual(m._say.call_args.args[0], "Sent request: Run tests.")
         self.assertEqual(self.run.await_count, 1)
+
+    async def test_agreeing_exact_read_can_split_inform_and_correction(self):
+        m = manager()
+        m._brief.return_value = {"sessionId": "alpha", "lastAssistantMessage": "Branch: `work/fix`"}
+        answer = judgment("correct", response="exact_branch", route="exact_branch", execute=0.02)
+        answer["act"]["probabilities"] = {"correct": 0.42, "inform": 0.37, "direct": 0.05, "unknown": 0.16}
+        m._jev.ask.return_value = answer
+        await m._turn("I only need the branch written in its record, not a switch.", None, None)
+        self.assertEqual(m._say.call_args.args[0], "work/fix")
+        self.run.assert_not_awaited()
 
     async def test_explicit_stop_delegates_existing_interruption(self):
         m = manager()

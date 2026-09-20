@@ -5,6 +5,8 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
+from pipecat.frames.frames import CancelFrame, EndFrame
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from test_dialogue_manager import TARGETS, judgment, manager
 
 from dialogue_manager import CURRENT_TURN, TurnGuard
@@ -107,6 +109,35 @@ class StageLifecycle(unittest.IsolatedAsyncioTestCase):
                 await m._judging
             else:
                 self.assertEqual(m._held, "Tell the other agent to")
+
+    async def test_shutdown_forwards_control_before_committed_delivery_finishes(self):
+        for frame in (CancelFrame(), EndFrame()):
+            m = manager()
+            old_epoch = m.dialogue.epoch
+            sending, finish_send, forwarded = asyncio.Event(), asyncio.Event(), asyncio.Event()
+            async def committed_send():
+                sending.set()
+                await finish_send.wait()
+                return "sent"
+            send = asyncio.create_task(committed_send())
+            m._deliveries.add(send)
+            await sending.wait()
+            async def push(actual, direction):
+                self.assertIs(actual, frame)
+                self.assertEqual(direction, FrameDirection.DOWNSTREAM)
+                self.assertGreater(m.dialogue.epoch, old_epoch)
+                self.assertFalse(send.done())
+                forwarded.set()
+            m.push_frame.side_effect = push
+            with patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                closing = asyncio.create_task(m.process_frame(frame, FrameDirection.DOWNSTREAM))
+                await asyncio.wait_for(forwarded.wait(), 1)
+                self.assertFalse(closing.done())
+                self.assertFalse(send.cancelled())
+                finish_send.set()
+                await closing
+            m.push_frame.assert_awaited_once_with(frame, FrameDirection.DOWNSTREAM)
+            self.assertEqual(send.result(), "sent")
 
     async def test_correction_cancels_invite_without_losing_the_new_turn(self):
         m, result = await self.run_stage_race("correct")

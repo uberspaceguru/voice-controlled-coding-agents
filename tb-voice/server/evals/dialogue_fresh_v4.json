@@ -1,0 +1,398 @@
+{
+  "schema_version": 1,
+  "purpose": "Fresh synthetic post-contract-validation challenge, not a benchmark. Two conversation narratives with independent complete pre-turn snapshots; no real user data or credentials.",
+  "evaluation_status": "post_contract_validation_challenge",
+  "holdout_policy": "Freeze this file and its SHA before live evaluation. Author has not inspected v3 challenge utterances or results. Do not tune prompts or thresholds against these cases, and do not describe the result as a benchmark or audio test.",
+  "scope": {
+    "synthetic_text_only": true,
+    "per_turn_seeded_context": true,
+    "delivery_is_simulated": true,
+    "conversation_resume_decision_only": true,
+    "memory_completion_not_measured": true
+  },
+  "fixtures": {
+    "targets": [
+      {
+        "sessionId": "kestrel",
+        "name": "Kestrel",
+        "goal": "Maintain the search API",
+        "project": "catalog-api",
+        "cwd": "/synthetic/catalog/api"
+      },
+      {
+        "sessionId": "lumen",
+        "name": "Lumen",
+        "goal": "Maintain the catalog interface",
+        "project": "catalog-ui",
+        "cwd": "/synthetic/catalog/ui"
+      }
+    ],
+    "briefs": {
+      "kestrel": {
+        "sessionId": "kestrel",
+        "lastAssistantMessage": "Command: `python -m pytest tests/test_pagination.py -q`"
+      },
+      "lumen": {
+        "sessionId": "lumen",
+        "lastAssistantMessage": "Branch: `feature/catalog-layout`"
+      }
+    },
+    "clock": {
+      "now": 1000,
+      "unit": "monotonic_seconds"
+    }
+  },
+  "conversations": [
+    {
+      "id": "fresh_v4_named_recipient",
+      "split": "held_out",
+      "tags": [
+        "available_named_agent",
+        "side_conversation",
+        "read_only_negation",
+        "acknowledgment"
+      ],
+      "initial": {
+        "stage": "lumen",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "kestrel",
+          "lumen"
+        ]
+      },
+      "turns": [
+        {
+          "id": "fresh_v4_named_recipient.1",
+          "text": "Kestrel, inspect the pagination tests and report any missing boundary cases.",
+          "context": {
+            "stage": "lumen",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "kestrel",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "sent",
+            "dispatch_count": 1,
+            "route": "send_message",
+            "dispatch_target": "kestrel",
+            "dispatch_text": "Kestrel, inspect the pagination tests and report any missing boundary cases."
+          }
+        },
+        {
+          "id": "fresh_v4_named_recipient.2",
+          "text": "Maya, can you help me untangle this microphone cable?",
+          "context": {
+            "stage": "lumen",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Kestrel, inspect the pagination tests and report any missing boundary cases.",
+              "target": "kestrel",
+              "age_seconds": 7,
+              "status": "sent"
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ],
+            "previous_turn": {
+              "text": "Kestrel, inspect the pagination tests and report any missing boundary cases.",
+              "act": "direct",
+              "response": "receipt",
+              "target": "kestrel"
+            }
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        },
+        {
+          "id": "fresh_v4_named_recipient.3",
+          "text": "Before anything runs, read Kestrel's saved test command verbatim; do not execute it.",
+          "context": {
+            "stage": "lumen",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Kestrel, inspect the pagination tests and report any missing boundary cases.",
+              "target": "kestrel",
+              "age_seconds": 18,
+              "status": "sent"
+            },
+            "last_command": {
+              "text": "python -m pytest tests/test_pagination.py -q",
+              "target": "kestrel",
+              "age_seconds": 4,
+              "status": "recorded"
+            },
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ],
+            "previous_turn": {
+              "text": "The recorded test command is available.",
+              "act": "inform",
+              "response": "summary",
+              "target": "kestrel"
+            }
+          },
+          "expect": {
+            "act": "inform",
+            "target": "kestrel",
+            "source": "last_command",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_command",
+            "literal": "python -m pytest tests/test_pagination.py -q"
+          }
+        },
+        {
+          "id": "fresh_v4_named_recipient.4",
+          "text": "Mm-hm, got it, thanks.",
+          "context": {
+            "stage": "lumen",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": {
+              "text": "python -m pytest tests/test_pagination.py -q",
+              "target": "kestrel",
+              "age_seconds": 10,
+              "status": "recorded"
+            },
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ],
+            "previous_turn": {
+              "text": "Before anything runs, read Kestrel's saved test command verbatim; do not execute it.",
+              "act": "inform",
+              "response": "exact_command",
+              "target": "kestrel"
+            }
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fresh_v4_return_and_target",
+      "split": "held_out",
+      "tags": [
+        "conversation_resume",
+        "stale_confirmation",
+        "missing_target",
+        "target_resolution"
+      ],
+      "initial": {
+        "stage": "kestrel",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "kestrel",
+          "lumen"
+        ]
+      },
+      "turns": [
+        {
+          "id": "fresh_v4_return_and_target.1",
+          "text": "Tranquility, remind me where we left off with this agent.",
+          "context": {
+            "stage": "kestrel",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Kestrel, inspect the pagination tests and report any missing boundary cases.",
+              "target": "kestrel",
+              "age_seconds": 50,
+              "status": "sent"
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ],
+            "previous_turn": {
+              "text": "Which boundary cases are still missing?",
+              "act": "inform",
+              "response": "detail",
+              "target": "kestrel"
+            }
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "route": "conversation_resume"
+          }
+        },
+        {
+          "id": "fresh_v4_return_and_target.2",
+          "text": "Yes, go ahead with it.",
+          "context": {
+            "stage": "kestrel",
+            "listening": "active",
+            "pending": {
+              "text": "Inspect the missing pagination boundary cases.",
+              "target": "kestrel",
+              "age_seconds": 76,
+              "stage_at_offer": "kestrel",
+              "kind": "send",
+              "status": "offered"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ],
+            "previous_turn": {
+              "text": "Should I send the pagination inspection request?",
+              "act": "inform",
+              "response": "clarification",
+              "target": "kestrel"
+            }
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "stage",
+            "source": "unknown",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stale_pending",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "fresh_v4_return_and_target.3",
+          "text": "Ask the other agent to inspect the timeout handling.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ],
+            "previous_turn": {
+              "text": "There is no fresh proposal to confirm.",
+              "act": "inform",
+              "response": "receipt",
+              "target": "kestrel"
+            }
+          },
+          "expect": {
+            "act": "direct",
+            "target": "ambiguous",
+            "source": "utterance",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "clarify_target",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "pending_status": "needs_target"
+          }
+        },
+        {
+          "id": "fresh_v4_return_and_target.4",
+          "text": "The one named Kestrel.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": {
+              "text": "Ask the other agent to inspect the timeout handling.",
+              "target": null,
+              "age_seconds": 3,
+              "stage_at_offer": null,
+              "kind": "send",
+              "status": "needs_target"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "kestrel",
+              "lumen"
+            ],
+            "previous_turn": {
+              "text": "Which agent should receive it?",
+              "act": "inform",
+              "response": "clarification",
+              "target": null
+            }
+          },
+          "expect": {
+            "act": "inform",
+            "target": "kestrel",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "offer_confirmation",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "pending_status": "offered"
+          }
+        }
+      ]
+    }
+  ]
+}

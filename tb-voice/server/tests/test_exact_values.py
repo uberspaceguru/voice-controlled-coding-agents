@@ -78,6 +78,9 @@ class Values(unittest.TestCase):
 
 class Routing(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self.memory_events = patch("memory_manager.emit", AsyncMock())
+        self.memory_events.start()
+        self.addCleanup(self.memory_events.stop)
         self.events = patch("dialogue_manager.emit", AsyncMock())
         self.events.start()
         self.addCleanup(self.events.stop)
@@ -129,7 +132,7 @@ class Routing(unittest.IsolatedAsyncioTestCase):
         with patch.object(manager, "emit", AsyncMock()), patch.object(manager, "note"):
             await m._turn("What command did you send to this agent?", None, None)
         m._do_send_message.assert_not_awaited()
-        self.assertNotIn("exact", m._say.call_args.kwargs)
+        self.assertIsNone(m._say.call_args.kwargs.get("exact"))
 
     async def test_no_stage_and_dead_session_do_not_fabricate(self):
         m = self.make_manager()
@@ -139,7 +142,7 @@ class Routing(unittest.IsolatedAsyncioTestCase):
         m = self.make_manager()
         m._targets.return_value = []
         await m._exact_value("directory")
-        self.assertNotIn("exact", m._say.call_args.kwargs)
+        self.assertIsNone(m._say.call_args.kwargs.get("exact"))
 
     async def test_known_values_are_literal_and_read_only(self):
         for kind, text, expected in [

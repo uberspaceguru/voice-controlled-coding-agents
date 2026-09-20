@@ -350,7 +350,8 @@ class Manager(DialogueManagerMixin, FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, (CancelFrame, EndFrame)):
-            await self._close_dialogue()
+            await self._close_dialogue(frame, direction)
+            return  # The lifecycle frame was forwarded before delivery draining.
         if isinstance(frame, StartFrame):
             # The pipeline is running and the mic is open: now it is listening.
             await emit(None, "ready")
@@ -472,7 +473,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         note(self.stage.get("name") or self.stage.get("goal") or self.stage["sessionId"][:8], rung["spoken"], "queued_native")
         await self._app_speaks(f"{SCHEME}://rung?session={self.stage['sessionId']}&kind={kind}", rung["spoken"])
 
-    async def _exact_value(self, kind: str, session_id: str | None = None):
+    async def _exact_value(self, kind: str, session_id: str | None = None, *, question=None):
         """Read-only terminal route: no answer model, command dispatch, or app sanitizer."""
         if not session_id and not self.stage:
             await self._say("Nobody is on stage yet. Say invite the next agent.")
@@ -482,17 +483,22 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         self._require_current()
         hits = [t for t in targets if t.get("sessionId") == sid]
         if len(hits) != 1:
-            await self._say("I can't verify that session's exact value right now.")
+            await self._exact_unavailable(question, sid, kind, "I can't verify that session's exact value right now.")
             return
         brief = await self._brief(sid) if kind in {"branch", "command"} else {}
         self._require_current()
         value = recorded_value(kind, hits[0], brief or {})
         if value is None:
-            await self._say("The session's record doesn't give that exact value.")
+            await self._exact_unavailable(question, sid, kind, "The session's record doesn't give that exact value.")
             return
         if kind in {"branch", "command"}:
             await self._say("Last reported " + kind + ":")
-        delivered = await self._say(value.value, exact=value)
+        if question is not None:
+            source = f"brief:{sid}:{(brief or {}).get('eventId', 'snapshot')}" if kind in {"branch", "command"} else f"targets:{sid}"
+            observation = self.memory.observe(source, sid, {"kind": kind, "value": value.value})
+            delivered = await self._speak_evidence(value.value, observation, question=question, exact=value)
+        else:
+            delivered = await self._say(value.value, exact=value)
         if delivered is True and kind == "command" and hasattr(self, "dialogue"):
             self.dialogue.command(value.value, sid)
 
@@ -566,14 +572,14 @@ class Manager(DialogueManagerMixin, FrameProcessor):
 
     # -- doors ----------------------------------------------------------------------
 
-    async def _say(self, text: str, voice: str = "manager", session: str | None = None, *, exact=None, response_mode="summary"):
+    async def _say(self, text: str, voice: str = "manager", session: str | None = None, *, exact=None, response_mode="summary", retry_interrupted=True):
         """Wait for correlated output completion, not a shared bot-stop event.
 
         At most one restart after a semantic backchannel interrupted playback.
         This proves transport output, never human hearing or acknowledgment.
         """
         from exact_speech import DialogueSpeakFrame
-        for attempt in range(2):
+        for attempt in range(2 if retry_interrupted else 1):
             await self._input_ready.wait()
             async with self._voice:
                 self._require_current()
@@ -590,6 +596,9 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                     completed = await self.deliverybook.wait(delivery, timeout)
                 except asyncio.CancelledError:
                     self.deliverybook.finish(delivery, "interrupted", "turn_superseded")
+                    raise
+                except Exception:
+                    self.deliverybook.finish(delivery, "failed", "speech_enqueue_failed")
                     raise
                 if completed:
                     note("Tranquility", delivery.generated_text or text, "output_complete")

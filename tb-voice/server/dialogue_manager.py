@@ -10,6 +10,7 @@ from dialogue import Dialogue, chosen
 from dialogue_questions import build_questions, judgment_state
 from events import emit
 from exact_values import ExactValue
+from memory_manager import MemoryManagerMixin
 
 
 @dataclass
@@ -21,10 +22,11 @@ class TurnGuard:
 CURRENT_TURN = ContextVar("manager_dialogue_turn", default=None)
 
 
-class DialogueManagerMixin:
+class DialogueManagerMixin(MemoryManagerMixin):
     def _init_dialogue(self):
         from speech_delivery import DeliveryBook
         self.dialogue = Dialogue()
+        self._init_memory()
         self.deliverybook = DeliveryBook()
         self._last_delivery = None
         self._handler = None
@@ -127,6 +129,7 @@ class DialogueManagerMixin:
             # Preview without mutations to decide whether this utterance should
             # supersede ongoing work. Silence never destroys an active answer.
             preview = deepcopy(self.dialogue).decide(text, answers, self.dialogue.epoch)
+            previous_pending = self.dialogue.pending
             if preview.op != "silent":
                 guard.epoch = self.dialogue.begin()
                 active = self._active_work
@@ -136,6 +139,7 @@ class DialogueManagerMixin:
                 decision = self.dialogue.decide(text, answers, guard.epoch)
             else:
                 decision = preview
+            self._remember_transition(previous_pending, decision)
             settled = True
             self._judging = None
             self._input_ready.set()
@@ -169,6 +173,18 @@ class DialogueManagerMixin:
             await self.broadcast_interruption()
             await self._do_mute("", frame, direction)
         elif decision.op in {"say", "clarify"}:
+            if (self.dialogue.stage and (decision.reason == "nothing_to_cancel"
+                    or decision.reason == "cannot_undo" and self.dialogue.last_information)):
+                canceled = self.memory.cancel_question(self.dialogue.stage, f"dialogue:{decision.epoch}:cancel")
+                if canceled:
+                    decision.text = "Canceled the unanswered question."
+                    if decision.reason == "cannot_undo":
+                        decision.text += " The earlier work request is unchanged."
+                    self.dialogue.last_information = None
+                    self.memory.remember_decision(self.dialogue.stage, "canceled",
+                                                  f"question:{canceled.id}", canceled.text)
+                    await emit(self, "memory", reason="question_canceled", question=canceled.id,
+                               target=canceled.target)
             # Offering happens after delivery to speech, not at proposal creation.
             offered = await self._say(decision.text, response_mode=decision.response)
             self._require_current()
@@ -235,18 +251,24 @@ class DialogueManagerMixin:
         from manager import RUNG_FOR
         target = decision.target
         route = decision.route
+        if route == "conversation_resume":
+            await self._resume_conversation(target)
+            return
+        question = self._memory_question(decision) if route not in {"invite_next", "teach", "speak", "summarize_recent"} else None
         if decision.recorded_text:
+            observation = self.memory.observe(
+                f"dialogue:{decision.source}:{decision.epoch}", target or "manager", {"value": decision.recorded_text})
             if decision.response == "exact_command":
                 try:
                     value = ExactValue("command", decision.recorded_text)
                 except ValueError:
-                    await self._say("That unsent request cannot be read as one exact command.")
+                    await self._say("That recorded request cannot be read as one exact command.")
                     return
-                await self._say(value.value, exact=value)
+                await self._speak_evidence(value.value, observation, question=question, exact=value)
             else:
                 prefix = {"last_sent_request": "Sent request: ",
                           "recorded_command": "Recorded command: "}.get(decision.reason, "Unsent request: ")
-                await self._say(prefix + decision.recorded_text, response_mode=decision.response)
+                await self._speak_evidence(prefix + decision.recorded_text, observation, question=question, response_mode=decision.response)
             return
         if route == "invite_next":
             await self._do_invite_next(decision.text, frame, direction)
@@ -266,7 +288,7 @@ class DialogueManagerMixin:
             await self._say("Which agent are you asking about?")
             return
         if decision.response.startswith("exact_"):
-            await self._exact_value(decision.response.removeprefix("exact_"), target)
+            await self._exact_value(decision.response.removeprefix("exact_"), target, question=question)
             return
         brief = await self._brief(target)
         self._require_current()
@@ -275,19 +297,28 @@ class DialogueManagerMixin:
             return
         mode = "detail" if decision.response == "detail" else "summary"
         kind = RUNG_FOR.get(route)
+        observation = self._observe_brief(target, brief)
+        update = kind == "findings" and mode == "summary"
+        if (update and not self._explicit_repeat(decision.text)
+                and not self.memory.should_update(observation, self._critical_update(brief))):
+            await emit(self, "memory", reason="unchanged_update_suppressed", target=target,
+                       source=observation.source_id)
+            await self._say("No new recorded update.", response_mode="receipt")
+            return
         rung = next((r for r in brief.get("rungs", []) if r.get("kind") == kind), None)
         if rung and mode != "detail":
             answer = rung["spoken"]
         else:
             answer = await self._brain.answer(decision.text, brief, self._recent, mode=mode)
         self._require_current()
-        delivered = await self._say(answer or "The notes don't say.", response_mode=mode)
+        delivered = await self._speak_evidence(answer or "The notes don't say.", observation,
+                                               question=question, response_mode=mode, update=update)
         self._require_current()
         # Only a recorded proposal that was actually presented is a referent.
         if delivered is True and kind == "solution" and rung and brief.get("proposal"):
             self.dialogue.offer_proposal(brief["proposal"], target)
 
-    async def _close_dialogue(self):
+    async def _close_dialogue(self, frame=None, direction=None):
         self.dialogue.begin()
         if self._held_task:
             self._held_task.cancel()
@@ -295,6 +326,11 @@ class DialogueManagerMixin:
         for task in (self._handler, self._active_work, self._judging):
             if task and not task.done():
                 task.cancel()
+        # A committed send may take tens of seconds to settle. Audio teardown
+        # must not wait behind that subprocess: forward the lifecycle frame once
+        # after invalidating local work, then observe the irreversible result.
+        if frame is not None:
+            await self.push_frame(frame, direction)
         # Observe already committed sends; never turn shutdown into a retry.
         if self._deliveries:
             await asyncio.gather(*tuple(self._deliveries), return_exceptions=True)
