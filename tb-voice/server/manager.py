@@ -11,6 +11,7 @@ See docs/design.md sections 2, 6, 7 and the manager-mode architecture page.
 import asyncio
 import json
 import os
+import re
 import time
 
 import httpx
@@ -26,6 +27,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from calls import record
 from events import emit
+from exact_speech import ExactSpeakFrame
+from exact_values import EXACT_INTENTS, exact_request, recorded_value
 from mute import EXTERNAL_UNTIL
 from spoken import spoken
 from tools import _json_or_text, _run
@@ -40,6 +43,7 @@ if not os.path.exists(TBASE) and TBASE != "tbase":
     logger.warning(f"TBASE_BIN {TBASE} does not exist; reads will fail closed")
 
 INTENTS = {
+    **EXACT_INTENTS,
     "invite_next": "Invite the next agent or session to speak; 'next agent'; 'who is up'; 'what's next' when no agent is on stage",
     "rung_goal": "Asks what this project or piece of work is, or what the goal is",
     "rung_findings": "Asks what the agent found or what happened",
@@ -80,7 +84,7 @@ COMMANDS = {"invite_next", "send_message", "start_agent", "rung_goal", "rung_fin
 SLOW_INTENTS = {"send_message", "start_agent", "summarize_recent", "custom", "teach", "speak"}
 
 # With a session on stage, a confident question about its work is for the manager.
-STAGE_QUESTIONS = {"rung_goal", "rung_findings", "rung_solution", "rung_why", "custom", "send_message"}
+STAGE_QUESTIONS = set(EXACT_INTENTS) | {"rung_goal", "rung_findings", "rung_solution", "rung_why", "custom", "send_message"}
 
 RUNG_FOR = {"rung_goal": "goal", "rung_findings": "findings",
             "rung_solution": "solution", "rung_why": "why"}
@@ -133,7 +137,10 @@ class JevClient:
                              "false": ("Thinking aloud, a rhetorical question, talking to another "
                                        f"person, reading text aloud, or the word {NAME.lower()} used for something else")}},
             "intent": {"type": "choice",
-                "instructions": "If text_to_judge is a request to the assistant, which kind is it?",
+                "instructions": ("If text_to_judge is a request to the assistant, which kind is it? "
+                                 "Exact-value intents only read an existing fact. If a request also "
+                                 "asks to execute or change something, choose send_message. "
+                                 "Asking what command was sent is read-only, not a send instruction."),
                 "criteria": INTENTS},
         })
         return float(answers["addressed"]["noul"]), answers["intent"]
@@ -157,7 +164,7 @@ class JevClient:
             {"action": {"type": "noul",
                         "instructions": "Is the developer asking the agent on stage to perform an action (open, run, create, change, send, fix, deploy, show), rather than asking a question about its work?",
                         "criteria": {"true": "An instruction or request for the agent to do something",
-                                     "false": "A question about what the agent did, found, proposes, or why"}}})
+                                     "false": "A question about what the agent did, found, proposes, or why; reading an exact directory, branch name, command text, or session identifier is a question, never permission to execute it"}}})
         return float(answers["action"]["noul"])
 
     async def confirm(self, utterance: str, question: str) -> dict:
@@ -401,8 +408,11 @@ class Manager(FrameProcessor):
         p, intent_answer = await self._jev.turn(text, self._recent, self.stage)
         ms = int((time.monotonic() - t0) * 1000)
         intent = _chosen(intent_answer)
+        exact_kind = exact_request(text)
+        if exact_kind:
+            intent = "exact_" + exact_kind
         low = text.lower()
-        if "send" in low and any(w in low for w in ("message", "to this agent", "to the agent", "to it")):
+        if not exact_kind and re.match(r"^(?:tranquility[, :]*)?(?:please\s+)?send\b", low) and any(w in low for w in ("message", "to this agent", "to the agent", "to it")):
             intent = "send_message"  # the words say so; Jev's tie-break does not
         if not self.stage and intent in RUNG_FOR:
             # "What's next?" with nobody on stage is the ⌃⌥ question: the next
@@ -432,6 +442,9 @@ class Manager(FrameProcessor):
         # on top of the voice. Only the slow intents get one.
         if intent in SLOW_INTENTS:
             await self._earcon("listening")
+        if intent in EXACT_INTENTS:
+            await self._exact_value(intent.removeprefix("exact_"))
+            return
         handler = getattr(self, f"_do_{intent}", None)
         if handler:
             await handler(text, frame, direction)
@@ -487,6 +500,26 @@ class Manager(FrameProcessor):
                    rung=kind, text=rung["spoken"][:160])
         note(self.stage.get("name") or self.stage.get("goal") or self.stage["sessionId"][:8], rung["spoken"], "spoken")
         await self._app_speaks(f"{SCHEME}://rung?session={self.stage['sessionId']}&kind={kind}", rung["spoken"])
+
+    async def _exact_value(self, kind: str):
+        """Read-only terminal route: no answer model, command dispatch, or app sanitizer."""
+        if not self.stage:
+            await self._say("Nobody is on stage yet. Say invite the next agent.")
+            return
+        sid = self.stage["sessionId"]
+        targets = await self._targets()
+        hits = [t for t in targets if t.get("sessionId") == sid]
+        if len(hits) != 1:
+            await self._say("I can't verify that session's exact value right now.")
+            return
+        brief = await self._brief(sid) if kind in {"branch", "command"} else {}
+        value = recorded_value(kind, hits[0], brief or {})
+        if value is None:
+            await self._say("The session's record doesn't give that exact value.")
+            return
+        if kind in {"branch", "command"}:
+            await self._say("Last reported " + kind + ":")
+        await self._say(value.value, exact=value)
 
     async def _do_custom(self, text, frame, direction):
         if not self.stage:
@@ -658,7 +691,7 @@ class Manager(FrameProcessor):
 
     # -- doors ----------------------------------------------------------------------
 
-    async def _say(self, text: str, voice: str = "manager", session: str | None = None):
+    async def _say(self, text: str, voice: str = "manager", session: str | None = None, *, exact=None):
         """The manager's voice. Holds the voice lock until its own speech stops,
         so nothing else can start talking over it."""
         async with self._voice:
@@ -666,7 +699,7 @@ class Manager(FrameProcessor):
             self._bot_stopped.clear()
             # The synthesizer notes the line when it speaks it (tts.py), so every
             # path the manager's voice takes lands in the transcript exactly once.
-            await self.push_frame(TTSSpeakFrame(text))
+            await self.push_frame(ExactSpeakFrame(text=text, value=exact) if exact is not None else TTSSpeakFrame(text))
             try:
                 await asyncio.wait_for(self._bot_stopped.wait(), 12.0)
             except TimeoutError:

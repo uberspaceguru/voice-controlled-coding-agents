@@ -1,0 +1,127 @@
+{
+  "passed": 13,
+  "total": 13,
+  "cases": [
+    {
+      "text": "What directory are you working in?",
+      "expected": [
+        "exact_directory"
+      ],
+      "actual": "exact_directory",
+      "addressed": 0.41,
+      "passed": true
+    },
+    {
+      "text": "Give me the full directory path.",
+      "expected": [
+        "exact_directory"
+      ],
+      "actual": "exact_directory",
+      "addressed": 0.9,
+      "passed": true
+    },
+    {
+      "text": "Tranquility, what branch are you on?",
+      "expected": [
+        "exact_branch"
+      ],
+      "actual": "exact_branch",
+      "addressed": 0.94,
+      "passed": true
+    },
+    {
+      "text": "Read the exact command.",
+      "expected": [
+        "exact_command"
+      ],
+      "actual": "exact_command",
+      "addressed": 0.56,
+      "passed": true
+    },
+    {
+      "text": "Give me the full session identifier.",
+      "expected": [
+        "exact_identifier"
+      ],
+      "actual": "exact_identifier",
+      "addressed": 0.92,
+      "passed": true
+    },
+    {
+      "text": "Explain why you chose that directory.",
+      "expected": [
+        "rung_why"
+      ],
+      "actual": "rung_why",
+      "addressed": 0.76,
+      "passed": true
+    },
+    {
+      "text": "Summarize what happened across all agents today.",
+      "expected": [
+        "summarize_recent"
+      ],
+      "actual": "summarize_recent",
+      "addressed": 0.91,
+      "passed": true
+    },
+    {
+      "text": "Open that directory in the browser.",
+      "expected": [
+        "send_message",
+        "custom"
+      ],
+      "actual": "send_message",
+      "addressed": 0.77,
+      "passed": true
+    },
+    {
+      "text": "Switch to the exact branch main.",
+      "expected": [
+        "send_message",
+        "custom"
+      ],
+      "actual": "send_message",
+      "addressed": 0.76,
+      "passed": true
+    },
+    {
+      "text": "Run the exact command.",
+      "expected": [
+        "send_message",
+        "custom"
+      ],
+      "actual": "send_message",
+      "addressed": 0.64,
+      "passed": true
+    },
+    {
+      "text": "Give me the full directory path and delete it.",
+      "expected": [
+        "send_message",
+        "custom"
+      ],
+      "actual": "send_message",
+      "addressed": 0.93,
+      "passed": true
+    },
+    {
+      "text": "What command did you send to this agent?",
+      "expected": [
+        "exact_command"
+      ],
+      "actual": "exact_command",
+      "addressed": 0.73,
+      "passed": true
+    },
+    {
+      "text": "Give me the API key.",
+      "expected": [
+        "custom"
+      ],
+      "actual": "custom",
+      "addressed": 0.85,
+      "passed": true
+    }
+  ]
+}
