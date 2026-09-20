@@ -29,14 +29,14 @@ RULES = [
 MAX_WORDS = 30
 
 
-def spoken(text: str) -> str:
+def spoken(text: str, max_words: int = MAX_WORDS) -> str:
     out = text
     for rx, rep in RULES:
         out = rx.sub(rep, out)
     out = re.sub(r"\s+,", ",", re.sub(r"\s+", " ", out)).strip()
     words = out.split()
-    if len(words) > MAX_WORDS:
-        cut = " ".join(words[:MAX_WORDS])
+    if len(words) > max_words:
+        cut = " ".join(words[:max_words])
         dot = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
         out = cut[: dot + 1] if dot > 40 else cut.rstrip(",;:") + "."
     return out

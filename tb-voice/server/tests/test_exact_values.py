@@ -77,14 +77,28 @@ class Values(unittest.TestCase):
 
 
 class Routing(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.events = patch("dialogue_manager.emit", AsyncMock())
+        self.events.start()
+        self.addCleanup(self.events.stop)
+
     def make_manager(self, intent="custom", p=1):
         m = object.__new__(Manager)
+        m._init_dialogue()
         m.stage = {"sessionId": SID, "name": "demo"}
         m._recent = []
         m.addressed = 0
         m._jev = AsyncMock()
         m._jev.last = {}
         m._jev.turn.return_value = (p, {"choice": intent, "confidence": 1})
+        def choice(value): return {"choice":value, "probabilities":{value:1.0}}
+        m._jev.ask.return_value = {
+            "addressed":{"noul":p}, "execute":{"noul":1},
+            "act":choice("direct" if intent in {"send_message", "custom"} else "inform"),
+            "route":choice(intent), "target":choice("stage"),
+            "source":choice("utterance"), "response":choice(intent if intent.startswith("exact_") else "summary"),
+        }
+        m._dialogue_dispatch = AsyncMock()
         m._targets = AsyncMock(return_value=[{"sessionId": SID, "cwd": PATH}])
         m._brief = AsyncMock(return_value={"sessionId": SID})
         m._say = AsyncMock()
@@ -108,7 +122,7 @@ class Routing(unittest.IsolatedAsyncioTestCase):
         with patch.object(manager, "emit", AsyncMock()), patch.object(manager, "note"):
             await m._turn("Give me the full directory path.", None, None)
         m._say.assert_not_awaited()
-        m._targets.assert_not_awaited()
+        m._dialogue_dispatch.assert_not_awaited()
 
     async def test_question_containing_send_not_overridden_to_action(self):
         m = self.make_manager("exact_command")
@@ -155,20 +169,8 @@ class Routing(unittest.IsolatedAsyncioTestCase):
         m = self.make_manager("custom")
         with patch.object(manager, "emit", AsyncMock()), patch.object(manager, "note"):
             await m._turn("Send a message to this agent: run the tests", None, None)
-        m._do_send_message.assert_awaited_once()
+        m._dialogue_dispatch.assert_awaited_once()
         m._say.assert_not_awaited()
-
-    async def test_ordinary_custom_action_and_question_unchanged(self):
-        for p in [0.1, 0.9]:
-            m = self.make_manager()
-            m._jev.is_action.return_value = p
-            m._answer_about_stage = AsyncMock()
-            with patch.object(manager, "emit", AsyncMock()):
-                await m._do_custom(
-                    "Open the browser" if p > 0.5 else "Explain the result", None, None
-                )
-            self.assertEqual(m._do_send_message.await_count, int(p > 0.5))
-            self.assertEqual(m._answer_about_stage.await_count, int(p < 0.5))
 
     async def test_tts_literal_scope_survives_await_and_resets_after_failure(self):
         service = object.__new__(SpokenGradiumTTSService)

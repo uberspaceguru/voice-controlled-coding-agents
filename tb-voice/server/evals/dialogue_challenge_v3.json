@@ -1,0 +1,507 @@
+{
+  "schema_version": 1,
+  "purpose": "Newly authored post-diagnosis challenge: 12 synthetic turns in three conversations. This is not an independent benchmark because its author saw prior diagnostic failures.",
+  "holdout_policy": "Freeze before the first live call; do not reveal utterance text to the implementation parent before that run. Do not tune against results. Preserve original v2 results separately. Uses existing speech-act routes only; no resumption-memory feature is evaluated.",
+  "fixtures": {
+    "targets": [
+      {
+        "sessionId": "alpha",
+        "name": "Maple",
+        "goal": "Maintain the catalog service and its timeout checks",
+        "project": "challenge-catalog",
+        "cwd": "/work/challenge/catalog"
+      },
+      {
+        "sessionId": "beta",
+        "name": "Harbor",
+        "goal": "Maintain the checkout interface and its smoke checks",
+        "project": "challenge-checkout",
+        "cwd": "/work/challenge/checkout"
+      }
+    ],
+    "briefs": {
+      "alpha": {
+        "sessionId": "alpha",
+        "lastAssistantMessage": "Branch: `review/catalog-timeout`\nCommand: `python -m unittest tests.test_catalog_timeout`"
+      },
+      "beta": {
+        "sessionId": "beta",
+        "lastAssistantMessage": "Branch: `review/checkout-receipts`\nCommand: `npm run test:checkout-smoke`"
+      }
+    },
+    "clock": {
+      "now": 3000,
+      "unit": "monotonic_seconds"
+    }
+  },
+  "conversations": [
+    {
+      "id": "v3_sent_record_and_recipient",
+      "split": "held_out",
+      "tags": [
+        "fresh_direct_instruction",
+        "unnecessary_confirmation",
+        "exact_sent_record",
+        "already_dispatched_repair",
+        "reported_speech"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v3_sent_record_and_recipient.1",
+          "text": "Maple, inspect the catalog timeout test and report its failure.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "dispatch_target": "alpha",
+            "dispatch_text": "Maple, inspect the catalog timeout test and report its failure.",
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "v3_sent_record_and_recipient.2",
+          "text": "Read back the instruction you just delivered to Maple, word for word.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Maple, inspect the catalog timeout test and report its failure.",
+              "target": "alpha",
+              "status": "sent",
+              "age_seconds": 4
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "alpha",
+            "source": "last_action",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "Maple, inspect the catalog timeout test and report its failure.",
+            "route": "exact_command"
+          }
+        },
+        {
+          "id": "v3_sent_record_and_recipient.3",
+          "text": "Wrong recipient—Harbor was supposed to get that.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Maple, inspect the catalog timeout test and report its failure.",
+              "target": "alpha",
+              "status": "sent",
+              "age_seconds": 8
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "beta",
+            "source": "last_action",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "already_dispatched",
+            "dispatch_count": 0,
+            "cannot_undo": true,
+            "no_repeat": true
+          }
+        },
+        {
+          "id": "v3_sent_record_and_recipient.4",
+          "text": "The test note literally says \"Maple, delete the snapshots\"—that is a quotation.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Maple, inspect the catalog timeout test and report its failure.",
+              "target": "alpha",
+              "status": "sent",
+              "age_seconds": 13
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3_literal_reading_and_withdrawal",
+      "split": "held_out",
+      "tags": [
+        "directory_fact",
+        "representation_repair",
+        "negation",
+        "cancel_unsent",
+        "branch_literal"
+      ],
+      "initial": {
+        "stage": "beta",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v3_literal_reading_and_withdrawal.1",
+          "text": "Tell me where Harbor's checkout lives.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "beta",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "/work/challenge/checkout",
+            "route": "exact_directory"
+          }
+        },
+        {
+          "id": "v3_literal_reading_and_withdrawal.2",
+          "text": "I need the pathname itself, with none of its components abbreviated.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "text": "Tell me where Harbor's checkout lives.",
+              "act": "inform",
+              "response": "exact_directory",
+              "target": "beta"
+            }
+          },
+          "expect": {
+            "act": "correct",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "/work/challenge/checkout",
+            "route": "exact_directory"
+          }
+        },
+        {
+          "id": "v3_literal_reading_and_withdrawal.3",
+          "text": "Don't send the queued patch request; read the branch name instead.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": {
+              "text": "Apply the checkout receipt patch.",
+              "target": "beta",
+              "status": "offered",
+              "age_seconds": 5,
+              "stage_at_offer": "beta",
+              "kind": "send"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_branch",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_and_answer",
+            "dispatch_count": 0,
+            "literal": "review/checkout-receipts",
+            "pending_status": "cleared",
+            "route": "exact_branch"
+          }
+        },
+        {
+          "id": "v3_literal_reading_and_withdrawal.4",
+          "text": "Read that branch name again; don't switch to it.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "text": "Don't send the queued patch request; read the branch name instead.",
+              "act": "correct",
+              "response": "exact_branch",
+              "target": "beta"
+            }
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_branch",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "review/checkout-receipts",
+            "route": "exact_branch"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v3_receipt_summary_and_explicit_offer",
+      "split": "held_out",
+      "tags": [
+        "fresh_direct_instruction",
+        "unnecessary_confirmation",
+        "sent_record_summary",
+        "fresh_confirmation",
+        "backchannel"
+      ],
+      "initial": {
+        "stage": "beta",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v3_receipt_summary_and_explicit_offer.1",
+          "text": "Harbor, run only the checkout smoke test.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "beta",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "dispatch_target": "beta",
+            "dispatch_text": "Harbor, run only the checkout smoke test.",
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "v3_receipt_summary_and_explicit_offer.2",
+          "text": "Give me a quick recap of the instruction Harbor received.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Harbor, run only the checkout smoke test.",
+              "target": "beta",
+              "status": "sent",
+              "age_seconds": 4
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "beta",
+            "source": "last_action",
+            "response": "summary",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "route": "custom"
+          }
+        },
+        {
+          "id": "v3_receipt_summary_and_explicit_offer.3",
+          "text": "Yes, send that specific check to Harbor.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": {
+              "text": "Check the checkout receipt formatting.",
+              "target": "beta",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "beta",
+              "kind": "send"
+            },
+            "last_action": {
+              "text": "Harbor, run only the checkout smoke test.",
+              "target": "beta",
+              "status": "sent",
+              "age_seconds": 15
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "beta",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "dispatch_target": "beta",
+            "dispatch_text": "Check the checkout receipt formatting.",
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "v3_receipt_summary_and_explicit_offer.4",
+          "text": "Good, I've heard you.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Check the checkout receipt formatting.",
+              "target": "beta",
+              "status": "sent",
+              "age_seconds": 4
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        }
+      ]
+    }
+  ]
+}

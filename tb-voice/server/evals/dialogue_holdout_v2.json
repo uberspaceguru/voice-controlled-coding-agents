@@ -1,0 +1,819 @@
+{
+  "schema_version": 1,
+  "purpose": "Second synthetic held-out interaction set authored after first-set diagnostics; independent wording, no real conversations or credentials.",
+  "holdout_policy": "Do not inspect these utterances or tune on them before freezing the final classifier and workflow policy. Run the bounded final repeated evaluation once; report all failures without relabeling or removing cases.",
+  "fixtures": {
+    "targets": [
+      {
+        "sessionId": "alpha",
+        "name": "Orchid",
+        "goal": "Maintain the service API and own its automated checks",
+        "project": "rehearsal-service",
+        "cwd": "/work/rehearsal/service"
+      },
+      {
+        "sessionId": "beta",
+        "name": "Cedar",
+        "goal": "Maintain client-side navigation and own its automated checks",
+        "project": "rehearsal-client",
+        "cwd": "/work/rehearsal/client"
+      }
+    ],
+    "briefs": {
+      "alpha": {
+        "sessionId": "alpha",
+        "lastAssistantMessage": "Branch: `review/service-timeouts`\nCommand: `python -m unittest checks.test_timeout`"
+      },
+      "beta": {
+        "sessionId": "beta",
+        "lastAssistantMessage": "Branch: `review/client-navigation`\nCommand: `npm run check:navigation`"
+      }
+    },
+    "clock": {
+      "now": 2000,
+      "unit": "monotonic_seconds"
+    }
+  },
+  "conversations": [
+    {
+      "id": "v2_role_and_target_repair",
+      "split": "held_out",
+      "tags": [
+        "role_ambiguity",
+        "alternate_agent_names",
+        "pending_target_repair",
+        "bound_confirmation"
+      ],
+      "initial": {
+        "stage": null,
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v2_role_and_target_repair.1",
+          "text": "Please have the test owner review the failing check.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "ambiguous",
+            "source": "utterance",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "clarify_target",
+            "dispatch_count": 0,
+            "pending_status": "needs_target",
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "v2_role_and_target_repair.2",
+          "text": "By test owner I mean Cedar, on the client side.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": {
+              "id": "v2-offer",
+              "text": "Please have the test owner review the failing check.",
+              "target": null,
+              "stage_at_offer": null,
+              "status": "needs_target",
+              "kind": "send",
+              "age_seconds": 4
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "beta",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "repair_pending",
+            "dispatch_count": 0,
+            "pending_status": "offered"
+          }
+        },
+        {
+          "id": "v2_role_and_target_repair.3",
+          "text": "Orchid, sorry; the service-side one is who I meant.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": {
+              "id": "v2-offer",
+              "text": "Please have the test owner review the failing check.",
+              "target": "beta",
+              "stage_at_offer": null,
+              "status": "offered",
+              "kind": "send",
+              "age_seconds": 4
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "alpha",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "repair_pending",
+            "dispatch_count": 0,
+            "pending_status": "offered"
+          }
+        },
+        {
+          "id": "v2_role_and_target_repair.4",
+          "text": "Yes, send the review request to Orchid.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": {
+              "id": "v2-offer",
+              "text": "Please have the test owner review the failing check.",
+              "target": "alpha",
+              "stage_at_offer": null,
+              "status": "offered",
+              "kind": "send",
+              "age_seconds": 4
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "alpha",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "dispatch_target": "alpha",
+            "dispatch_text": "Please have the test owner review the failing check.",
+            "pending_status": "cleared",
+            "route": "send_message"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2_literal_format_repairs",
+      "split": "held_out",
+      "tags": [
+        "exact_directory",
+        "format_repair",
+        "historical_action",
+        "exact_branch",
+        "pending_payload_is_not_path"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v2_literal_format_repairs.1",
+          "text": "Where is Orchid keeping this checkout?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "/work/rehearsal/service",
+            "route": "exact_directory"
+          }
+        },
+        {
+          "id": "v2_literal_format_repairs.2",
+          "text": "Include every folder name from the root this time.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Inspect the timeout report.",
+              "target": "alpha",
+              "status": "sent",
+              "age_seconds": 25
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "act": "inform",
+              "response": "exact_directory",
+              "target": "alpha",
+              "text": "Where is Orchid keeping this checkout?"
+            }
+          },
+          "expect": {
+            "act": "correct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "/work/rehearsal/service",
+            "route": "exact_directory"
+          }
+        },
+        {
+          "id": "v2_literal_format_repairs.3",
+          "text": "And say the branch label character for character.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "act": "inform",
+              "response": "exact_directory",
+              "target": "alpha",
+              "text": "Include every folder name from the root this time."
+            }
+          },
+          "expect": {
+            "act": "inform",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "exact_branch",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "review/service-timeouts",
+            "route": "exact_branch"
+          }
+        },
+        {
+          "id": "v2_literal_format_repairs.4",
+          "text": "Discard the queued shell instruction and read the checkout location.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "v2-offer",
+              "text": "python -m unittest checks.test_timeout",
+              "target": "alpha",
+              "stage_at_offer": "alpha",
+              "status": "offered",
+              "kind": "send",
+              "age_seconds": 4
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_and_answer",
+            "dispatch_count": 0,
+            "literal": "/work/rehearsal/service",
+            "pending_status": "cleared",
+            "route": "exact_directory"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2_confirmation_after_topic_change",
+      "split": "held_out",
+      "tags": [
+        "proposal_reference",
+        "unrelated_information",
+        "unbound_confirmation",
+        "acknowledgment"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": {
+          "text": "Remove only the generated preview artifacts.",
+          "target": "alpha",
+          "status": "offered",
+          "age_seconds": 4
+        },
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v2_confirmation_after_topic_change.1",
+          "text": "Would you carry out the cleanup you just proposed?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": {
+              "text": "Remove only the generated preview artifacts.",
+              "target": "alpha",
+              "status": "offered",
+              "age_seconds": 4
+            },
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "stage",
+            "source": "proposal",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "offer_confirmation",
+            "dispatch_count": 0,
+            "pending_status": "offered",
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "v2_confirmation_after_topic_change.2",
+          "text": "Actually, tell me what Cedar is working on before we decide.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "v2-offer",
+              "text": "Remove only the generated preview artifacts.",
+              "target": "alpha",
+              "stage_at_offer": "alpha",
+              "status": "offered",
+              "kind": "send",
+              "age_seconds": 4
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "beta",
+            "source": "utterance",
+            "response": "summary",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "pending_status": "cleared",
+            "route": "rung_goal"
+          }
+        },
+        {
+          "id": "v2_confirmation_after_topic_change.3",
+          "text": "Yes, carry on.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "act": "inform",
+              "response": "summary",
+              "target": "beta",
+              "text": "Actually, tell me what Cedar is working on before we decide."
+            }
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "none",
+            "source": "unknown",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "no_pending",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "v2_confirmation_after_topic_change.4",
+          "text": "Right, understood.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2_audio_unsent_and_running_work",
+      "split": "held_out",
+      "tags": [
+        "audio_only_stop",
+        "pending_cancellation",
+        "running_agent_stop",
+        "sent_request_fact"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": {
+          "text": "Inspect the timeout report.",
+          "target": "alpha",
+          "status": "sent",
+          "age_seconds": 4
+        },
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v2_audio_unsent_and_running_work.1",
+          "text": "Enough narration; let the service agent keep working.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Inspect the timeout report.",
+              "target": "alpha",
+              "status": "sent",
+              "age_seconds": 4
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stop_speaking",
+            "dispatch_count": 0,
+            "audio_interrupt": true,
+            "task_stop_count": 0,
+            "route": "stop_speaking"
+          }
+        },
+        {
+          "id": "v2_audio_unsent_and_running_work.2",
+          "text": "Scrap the request that hasn't gone out yet.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "v2-offer",
+              "text": "Compare the two navigation traces.",
+              "target": "beta",
+              "stage_at_offer": "alpha",
+              "status": "offered",
+              "kind": "send",
+              "age_seconds": 4
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "cancel",
+            "target": "beta",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_pending",
+            "dispatch_count": 0,
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "v2_audio_unsent_and_running_work.3",
+          "text": "Cedar should stop its current coding task now.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "beta",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch_stop",
+            "dispatch_count": 1,
+            "dispatch_target": "beta",
+            "dispatch_text": "Cedar should stop its current coding task now.",
+            "local_audio_interrupt": false,
+            "route": "stop_agent"
+          }
+        },
+        {
+          "id": "v2_audio_unsent_and_running_work.4",
+          "text": "What instruction reached Cedar?",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Cedar should stop its current coding task now.",
+              "target": "beta",
+              "status": "sent",
+              "age_seconds": 4
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "beta",
+            "source": "last_action",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "literal": "Cedar should stop its current coding task now.",
+            "route": "exact_command"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2_reports_and_hypotheticals",
+      "split": "held_out",
+      "tags": [
+        "quoted_future_speech",
+        "hypothetical_confirmation",
+        "reading_aloud",
+        "hypothetical_advice"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "v2_reports_and_hypotheticals.1",
+          "text": "In tomorrow's demo I'll say, \"Orchid, rebuild everything.\"",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "v2_reports_and_hypotheticals.2",
+          "text": "If somebody said yes, would that send the proposal immediately?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "v2-offer",
+              "text": "Compare the two navigation traces.",
+              "target": "alpha",
+              "stage_at_offer": "alpha",
+              "status": "offered",
+              "kind": "send",
+              "age_seconds": 4
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "pending_status": "cleared",
+            "route": "custom"
+          }
+        },
+        {
+          "id": "v2_reports_and_hypotheticals.3",
+          "text": "Cedar's log contains the words \"stop listening\"; I'm reading it to myself.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0,
+            "listening_after": "active"
+          }
+        },
+        {
+          "id": "v2_reports_and_hypotheticals.4",
+          "text": "Suppose the check failed again; what would you recommend, without starting anything?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "route": "custom"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 """An internal speech frame; model text and public tools cannot select this mode."""
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from pipecat.frames.frames import TTSSpeakFrame
 
@@ -8,7 +9,14 @@ from exact_values import ExactValue
 
 
 @dataclass
-class ExactSpeakFrame(TTSSpeakFrame):
+class DialogueSpeakFrame(TTSSpeakFrame):
+    current: Callable[[], bool] | None = field(default=None, repr=False)
+    response_mode: str = "summary"
+    delivery: object | None = field(default=None, repr=False)
+
+
+@dataclass
+class ExactSpeakFrame(DialogueSpeakFrame):
     value: ExactValue | None = None
 
     def __post_init__(self):

@@ -1,0 +1,2452 @@
+{
+  "schema_version": 1,
+  "purpose": "Synthetic multi-turn behavioral contracts for stateful manager speech acts; no real user records or credentials.",
+  "holdout_policy": "Freeze prompts and thresholds before first held_out evaluation. Do not tune on its failures; report them and reserve new unseen cases for subsequent iterations.",
+  "fixtures": {
+    "targets": [
+      {
+        "sessionId": "alpha",
+        "name": "Alpha",
+        "goal": "Maintain the demo API",
+        "project": "demo-api",
+        "cwd": "/work/demo/api"
+      },
+      {
+        "sessionId": "beta",
+        "name": "Beta",
+        "goal": "Maintain the demo website",
+        "project": "demo-web",
+        "cwd": "/work/demo/web"
+      }
+    ],
+    "briefs": {
+      "alpha": {
+        "sessionId": "alpha",
+        "lastAssistantMessage": "Branch: `feature/api-tests`\nCommand: `python -m unittest tests.test_api`"
+      },
+      "beta": {
+        "sessionId": "beta",
+        "lastAssistantMessage": "Branch: `feature/web-copy`\nCommand: `npm run test -- --runInBand`"
+      }
+    },
+    "clock": {
+      "now": 1000,
+      "unit": "monotonic_seconds"
+    }
+  },
+  "conversations": [
+    {
+      "id": "directory_repair",
+      "split": "development",
+      "tags": [
+        "original_directory_regression",
+        "literal",
+        "follow_up",
+        "backchannel"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "directory_repair.1",
+          "text": "What directory are you working in?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_directory",
+            "literal": "/work/demo/api"
+          }
+        },
+        {
+          "id": "directory_repair.2",
+          "text": "Give me the full directory path.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_directory",
+            "literal": "/work/demo/api"
+          }
+        },
+        {
+          "id": "directory_repair.3",
+          "text": "Explain why you chose that directory.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "route": "rung_why"
+          }
+        },
+        {
+          "id": "directory_repair.4",
+          "text": "Okay.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "command_question_then_permission",
+      "split": "development",
+      "tags": [
+        "command_vs_action",
+        "source_selection",
+        "fresh_confirmation",
+        "no_replay"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "command_question_then_permission.1",
+          "text": "What command did you send?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": {
+              "text": "Run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "last_command",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_command",
+            "literal": "Run the unit tests."
+          }
+        },
+        {
+          "id": "command_question_then_permission.2",
+          "text": "Send that command.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": {
+              "text": "Run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "stage",
+            "source": "last_command",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "offer_confirmation",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "pending_status": "offered"
+          }
+        },
+        {
+          "id": "command_question_then_permission.3",
+          "text": "Yes, send it.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-command",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "alpha",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "route": "send_message",
+            "dispatch_target": "alpha",
+            "dispatch_text": "Run the unit tests.",
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "command_question_then_permission.4",
+          "text": "Yes.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "last_command": {
+              "text": "Run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "none",
+            "source": "unknown",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "no_pending",
+            "dispatch_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "repair_pending_target",
+      "split": "development",
+      "tags": [
+        "ambiguous_target",
+        "pending_repair",
+        "fresh_candidate",
+        "confirmation"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "repair_pending_target.1",
+          "text": "Tell that one to run the unit tests.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "ambiguous",
+            "source": "utterance",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "clarify_target",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "pending_status": "needs_target"
+          }
+        },
+        {
+          "id": "repair_pending_target.2",
+          "text": "No, I meant the other agent, Beta.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-target",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "needs_target",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "beta",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "repair_pending",
+            "dispatch_count": 0,
+            "pending_status": "offered"
+          }
+        },
+        {
+          "id": "repair_pending_target.3",
+          "text": "Go ahead.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-target",
+              "target": "beta",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "beta",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "route": "send_message",
+            "dispatch_target": "beta",
+            "dispatch_text": "Run the unit tests.",
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "repair_pending_target.4",
+          "text": "Thanks.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Run the unit tests.",
+              "target": "beta",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "repair_after_dispatch",
+      "split": "development",
+      "tags": [
+        "executed_action",
+        "cannot_undo",
+        "no_replay",
+        "question"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "repair_after_dispatch.1",
+          "text": "Tell Alpha to run the unit tests.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "route": "send_message",
+            "dispatch_target": "alpha",
+            "dispatch_text": "Tell Alpha to run the unit tests."
+          }
+        },
+        {
+          "id": "repair_after_dispatch.2",
+          "text": "No, I meant the other agent.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Tell Alpha to run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "beta",
+            "source": "unknown",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "already_dispatched",
+            "dispatch_count": 0,
+            "cannot_undo": true,
+            "no_repeat": true
+          }
+        },
+        {
+          "id": "repair_after_dispatch.3",
+          "text": "What command did you send to Alpha?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Tell Alpha to run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "last_command": {
+              "text": "Tell Alpha to run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "alpha",
+            "source": "last_command",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_command",
+            "literal": "Tell Alpha to run the unit tests."
+          }
+        },
+        {
+          "id": "repair_after_dispatch.4",
+          "text": "Just summarize its result; do not run anything.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "summary",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "route": "rung_findings"
+          }
+        }
+      ]
+    },
+    {
+      "id": "negation_and_representation_repair",
+      "split": "development",
+      "tags": [
+        "negation",
+        "repair_mode",
+        "quoted_instruction",
+        "literal"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "negation_and_representation_repair.1",
+          "text": "Don't run it, just tell me the command.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-no-run",
+              "target": "alpha",
+              "text": "python -m unittest tests.test_api",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "stage",
+            "source": "pending",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_and_answer",
+            "dispatch_count": 0,
+            "route": "exact_command",
+            "pending_status": "cleared",
+            "literal": "python -m unittest tests.test_api"
+          }
+        },
+        {
+          "id": "negation_and_representation_repair.2",
+          "text": "Actually, use the full path.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "act": "inform",
+              "text": "Where is the project?",
+              "response": "summary",
+              "target": "alpha"
+            }
+          },
+          "expect": {
+            "act": "correct",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_directory",
+            "literal": "/work/demo/api"
+          }
+        },
+        {
+          "id": "negation_and_representation_repair.3",
+          "text": "The note says \"run the unit tests\". What does that mean?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "route": "custom"
+          }
+        },
+        {
+          "id": "negation_and_representation_repair.4",
+          "text": "I wonder whether running the tests would help.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "confirmations_need_live_offer",
+      "split": "development",
+      "tags": [
+        "missing_proposal",
+        "expired_proposal",
+        "reported_speech",
+        "confirmation"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "confirmations_need_live_offer.1",
+          "text": "Yes.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "none",
+            "source": "unknown",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "no_pending",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "confirmations_need_live_offer.2",
+          "text": "Sounds good.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "confirmations_need_live_offer.3",
+          "text": "Yes, go ahead.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-expired",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 120,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "none",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stale_pending",
+            "dispatch_count": 0,
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "confirmations_need_live_offer.4",
+          "text": "I told Sam \"yes, go ahead\" earlier.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "references_are_grounded",
+      "split": "development",
+      "tags": [
+        "ambiguous_reference",
+        "fresh_proposal",
+        "stage_switch",
+        "source_selection"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "references_are_grounded.1",
+          "text": "Do that.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "stage",
+            "source": "unknown",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "clarify_source",
+            "dispatch_count": 0,
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "references_are_grounded.2",
+          "text": "Do that.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": {
+              "id": "proposal-tests",
+              "text": "Run only the API unit tests.",
+              "target": "alpha",
+              "age_seconds": 3,
+              "status": "offered"
+            },
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "stage",
+            "source": "proposal",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "offer_confirmation",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "pending_status": "offered"
+          }
+        },
+        {
+          "id": "references_are_grounded.3",
+          "text": "No, not that.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-proposal",
+              "target": "alpha",
+              "text": "Run only the API unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "reject",
+            "target": "stage",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_pending",
+            "dispatch_count": 0,
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "references_are_grounded.4",
+          "text": "Same agent, do that.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 120,
+              "status": "sent"
+            },
+            "last_command": null,
+            "proposal": {
+              "id": "proposal-old",
+              "text": "Run only the API unit tests.",
+              "target": "alpha",
+              "age_seconds": 120,
+              "status": "offered"
+            },
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "previous",
+            "source": "proposal",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "stale_reference",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "no_repeat": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "speech_listening_and_hold",
+      "split": "development",
+      "tags": [
+        "stop_speaking",
+        "pause_listening",
+        "hold",
+        "resume"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "speech_listening_and_hold.1",
+          "text": "Stop speaking.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stop_speaking",
+            "dispatch_count": 0,
+            "route": "stop_speaking",
+            "audio_interrupt": true,
+            "task_stop_count": 0
+          }
+        },
+        {
+          "id": "speech_listening_and_hold.2",
+          "text": "Pause listening.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "none",
+            "source": "unknown",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "pause_listening",
+            "dispatch_count": 0,
+            "route": "pause_listening",
+            "listening_after": "paused"
+          }
+        },
+        {
+          "id": "speech_listening_and_hold.3",
+          "text": "Tell Alpha to run the unit tests.",
+          "context": {
+            "stage": "alpha",
+            "listening": "paused",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "silent",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "paused",
+            "dispatch_count": 0,
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "speech_listening_and_hold.4",
+          "text": "Tranquility, resume listening.",
+          "context": {
+            "stage": "alpha",
+            "listening": "paused",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "none",
+            "source": "unknown",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "resume_listening",
+            "dispatch_count": 0,
+            "route": "resume_listening",
+            "listening_after": "active"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel_unsent_or_running",
+      "split": "development",
+      "tags": [
+        "cancel_pending",
+        "hold",
+        "resume",
+        "stop_running_agent"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "cancel_unsent_or_running.1",
+          "text": "Hold that request.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-held",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "stage",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "hold_pending",
+            "dispatch_count": 0,
+            "route": "hold",
+            "pending_status": "held"
+          }
+        },
+        {
+          "id": "cancel_unsent_or_running.2",
+          "text": "Resume that request.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-held",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "held",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "stage",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "offer_confirmation",
+            "dispatch_count": 0,
+            "route": "resume",
+            "pending_status": "offered"
+          }
+        },
+        {
+          "id": "cancel_unsent_or_running.3",
+          "text": "Never mind.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-held",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "cancel",
+            "target": "stage",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_pending",
+            "dispatch_count": 0,
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "cancel_unsent_or_running.4",
+          "text": "Tell Alpha to stop its running task.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "running"
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch_stop",
+            "dispatch_count": 1,
+            "route": "stop_agent",
+            "dispatch_target": "alpha",
+            "dispatch_text": "Tell Alpha to stop its running task.",
+            "local_audio_interrupt": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "side_conversation_and_backchannel",
+      "split": "development",
+      "tags": [
+        "thinking_aloud",
+        "side_conversation",
+        "reported_speech",
+        "ack"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "side_conversation_and_backchannel.1",
+          "text": "Maybe the cache is stale, or maybe the build is slow.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "side_conversation_and_backchannel.2",
+          "text": "Sam, can you send that command to Alpha?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "side_conversation_and_backchannel.3",
+          "text": "Sam said \"Tranquility, deploy it\" and everyone laughed.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "side_conversation_and_backchannel.4",
+          "text": "Mm-hmm.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "inflight_cancellation_and_delivery",
+      "split": "development",
+      "tags": [
+        "cancellation_race",
+        "duplicate_transcript",
+        "stage_switch_race",
+        "dispatch_receipt"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "inflight_cancellation_and_delivery.1",
+          "text": "Tell Alpha to run the unit tests.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "superseded",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "speech_count": 0
+          },
+          "events": [
+            {
+              "at": "judgment_inflight",
+              "type": "cancel",
+              "text": "Never mind."
+            }
+          ]
+        },
+        {
+          "id": "inflight_cancellation_and_delivery.2",
+          "text": "Never mind.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "inflight": {
+              "phase": "judgment",
+              "text": "Tell Alpha to run the unit tests.",
+              "target": "alpha"
+            }
+          },
+          "expect": {
+            "act": "cancel",
+            "target": "none",
+            "source": "unknown",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_inflight",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "inflight_cancellation_and_delivery.3",
+          "text": "Tell Alpha to run the unit tests.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Tell Alpha to run the unit tests.",
+              "target": "alpha",
+              "age_seconds": 0.2,
+              "status": "sent"
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "duplicate",
+            "dispatch_count": 0,
+            "route": "send_message",
+            "speech_count": 0,
+            "no_repeat": true
+          },
+          "transcript": {
+            "id": "transcript-duplicate",
+            "same_as_previous": true
+          }
+        },
+        {
+          "id": "inflight_cancellation_and_delivery.4",
+          "text": "Explain the current agent's findings.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "superseded",
+            "dispatch_count": 0,
+            "route": "rung_findings",
+            "speech_count": 0
+          },
+          "events": [
+            {
+              "at": "answer_inflight",
+              "type": "stage_changed",
+              "stage": "beta"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "held_asr_and_polite_work",
+      "split": "held_out",
+      "tags": [
+        "asr",
+        "polite_directive",
+        "backchannel",
+        "exact_command"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "held_asr_and_polite_work.1",
+          "text": "Trank, what folder is this session actually in?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_directory",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_directory",
+            "literal": "/work/demo/api"
+          }
+        },
+        {
+          "id": "held_asr_and_polite_work.2",
+          "text": "Could you have Beta check the homepage links now?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "beta",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch",
+            "dispatch_count": 1,
+            "route": "send_message",
+            "dispatch_target": "beta",
+            "dispatch_text": "Could you have Beta check the homepage links now?"
+          }
+        },
+        {
+          "id": "held_asr_and_polite_work.3",
+          "text": "Uh huh, gotcha.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "held_asr_and_polite_work.4",
+          "text": "Remind me verbatim what you just passed along to Beta.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": {
+              "text": "Could you have Beta check the homepage links now?",
+              "target": "beta",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "beta",
+            "source": "last_command",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_command",
+            "literal": "Could you have Beta check the homepage links now?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "held_candidate_and_identifier",
+      "split": "held_out",
+      "tags": [
+        "ambiguous_target",
+        "literal_identifier",
+        "branch",
+        "same_agent"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "held_candidate_and_identifier.1",
+          "text": "That one over there needs to redo the check.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "ambiguous",
+            "source": "utterance",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "clarify_target",
+            "dispatch_count": 0,
+            "route": "send_message"
+          }
+        },
+        {
+          "id": "held_candidate_and_identifier.2",
+          "text": "The website session; that is the one I meant.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": {
+              "id": "p-hold-target",
+              "target": null,
+              "text": "Redo the check.",
+              "kind": "send",
+              "status": "needs_target",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "beta",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "repair_pending",
+            "dispatch_count": 0,
+            "pending_status": "offered"
+          }
+        },
+        {
+          "id": "held_candidate_and_identifier.3",
+          "text": "First read me that session's complete ID.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": {
+              "id": "p-hold-target",
+              "target": "beta",
+              "text": "Redo the check.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "beta",
+            "source": "utterance",
+            "response": "exact_identifier",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_identifier",
+            "literal": "beta",
+            "pending_status": "held"
+          }
+        },
+        {
+          "id": "held_candidate_and_identifier.4",
+          "text": "Which branch name is the same agent reporting?",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "act": "inform",
+              "response": "exact_identifier",
+              "target": "beta",
+              "text": "First read me that session's complete ID."
+            }
+          },
+          "expect": {
+            "act": "inform",
+            "target": "previous",
+            "source": "utterance",
+            "response": "exact_branch",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_branch",
+            "literal": "feature/web-copy"
+          }
+        }
+      ]
+    },
+    {
+      "id": "held_repair_negated_quotation",
+      "split": "held_out",
+      "tags": [
+        "repair_after_dispatch",
+        "negation",
+        "quoted_speech",
+        "exact_fact"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "held_repair_negated_quotation.1",
+          "text": "Actually I wanted Beta, not Alpha.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "Check the API error message.",
+              "target": "alpha",
+              "age_seconds": 5,
+              "status": "sent"
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "beta",
+            "source": "unknown",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "already_dispatched",
+            "dispatch_count": 0,
+            "cannot_undo": true,
+            "no_repeat": true
+          }
+        },
+        {
+          "id": "held_repair_negated_quotation.2",
+          "text": "Leave it unsent. I only want to hear the proposed command.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": {
+              "id": "p-hear-only",
+              "target": "beta",
+              "text": "npm run test -- --runInBand",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "correct",
+            "target": "stage",
+            "source": "pending",
+            "response": "exact_command",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_and_answer",
+            "dispatch_count": 0,
+            "route": "exact_command",
+            "pending_status": "cleared",
+            "literal": "npm run test -- --runInBand"
+          }
+        },
+        {
+          "id": "held_repair_negated_quotation.3",
+          "text": "Why did the README say \"send the command\"?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "dispatch_count": 0,
+            "route": "rung_why"
+          }
+        },
+        {
+          "id": "held_repair_negated_quotation.4",
+          "text": "Do not change branches; spell out the branch we have.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "exact_branch",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer_exact",
+            "dispatch_count": 0,
+            "route": "exact_branch",
+            "literal": "feature/api-tests"
+          }
+        }
+      ]
+    },
+    {
+      "id": "held_expiry_and_social_yes",
+      "split": "held_out",
+      "tags": [
+        "expired_confirmation",
+        "stage_switch",
+        "reported_confirmation",
+        "ack_with_pending"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "held_expiry_and_social_yes.1",
+          "text": "Sure, do it now.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-too-old",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 300,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "none",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stale_pending",
+            "dispatch_count": 0,
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "held_expiry_and_social_yes.2",
+          "text": "Sounds good, go ahead.",
+          "context": {
+            "stage": "beta",
+            "listening": "active",
+            "pending": {
+              "id": "p-other-stage",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "confirm",
+            "target": "none",
+            "source": "pending",
+            "response": "clarification",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stage_changed",
+            "dispatch_count": 0,
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "held_expiry_and_social_yes.3",
+          "text": "He said yes to the other plan, not this one.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-not-his-plan",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0
+          }
+        },
+        {
+          "id": "held_expiry_and_social_yes.4",
+          "text": "Mm, I see.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": {
+              "id": "p-still-awaiting",
+              "target": "alpha",
+              "text": "Run the unit tests.",
+              "kind": "send",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "alpha"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "dispatch_count": 0,
+            "pending_status": "offered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "held_races_and_truthful_receipts",
+      "split": "held_out",
+      "tags": [
+        "cancel_answer",
+        "cancel_audio",
+        "deferred_delivery",
+        "failed_delivery"
+      ],
+      "initial": {
+        "stage": "alpha",
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "alpha",
+          "beta"
+        ]
+      },
+      "turns": [
+        {
+          "id": "held_races_and_truthful_receipts.1",
+          "text": "Walk me through why the API check failed.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "stage",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "superseded",
+            "dispatch_count": 0,
+            "route": "rung_why",
+            "speech_count": 0
+          },
+          "events": [
+            {
+              "at": "answer_inflight",
+              "type": "cancel",
+              "text": "Forget it."
+            }
+          ]
+        },
+        {
+          "id": "held_races_and_truthful_receipts.2",
+          "text": "Quiet for a second.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "inflight": {
+              "phase": "tts",
+              "target": "alpha",
+              "text": "The API check failed because..."
+            }
+          },
+          "expect": {
+            "act": "control",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stop_speaking",
+            "dispatch_count": 0,
+            "route": "stop_speaking",
+            "audio_interrupt": true,
+            "task_stop_count": 0
+          }
+        },
+        {
+          "id": "held_races_and_truthful_receipts.3",
+          "text": "Ask Beta to retry the browser check.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "beta",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "waiting",
+            "dispatch_count": 1,
+            "route": "send_message",
+            "dispatch_target": "beta",
+            "dispatch_text": "Ask Beta to retry the browser check.",
+            "receipt_contains": "waiting",
+            "receipt_must_not_contain": "sent"
+          },
+          "delivery": {
+            "exit_code": 3,
+            "meaning": "deferred"
+          }
+        },
+        {
+          "id": "held_races_and_truthful_receipts.4",
+          "text": "Have Alpha rerun the failing case.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "target": "alpha",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "failed",
+            "dispatch_count": 1,
+            "route": "send_message",
+            "dispatch_target": "alpha",
+            "dispatch_text": "Have Alpha rerun the failing case.",
+            "receipt_contains": "failed",
+            "receipt_must_not_contain": "sent"
+          },
+          "delivery": {
+            "exit_code": 5,
+            "meaning": "failed"
+          }
+        }
+      ]
+    }
+  ]
+}

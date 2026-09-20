@@ -1,0 +1,300 @@
+"""Connect the explicit dialogue policy to the manager's existing read/speak doors."""
+
+import asyncio
+import time
+from contextvars import ContextVar
+from copy import deepcopy
+from dataclasses import dataclass
+
+from dialogue import Dialogue, chosen
+from dialogue_questions import build_questions, judgment_state
+from events import emit
+from exact_values import ExactValue
+
+
+@dataclass
+class TurnGuard:
+    epoch: int
+    stage: str | None
+
+
+CURRENT_TURN = ContextVar("manager_dialogue_turn", default=None)
+
+
+class DialogueManagerMixin:
+    def _init_dialogue(self):
+        from speech_delivery import DeliveryBook
+        self.dialogue = Dialogue()
+        self.deliverybook = DeliveryBook()
+        self._last_delivery = None
+        self._handler = None
+        self._active_work = None
+        self._judging = None
+        self._input_serial = 0
+        self._input_ready = asyncio.Event()
+        self._input_ready.set()
+        self._deliveries = set()
+
+    def _current(self):
+        guard = CURRENT_TURN.get()
+        return guard is None or (
+            self.dialogue.epoch == guard.epoch
+            and (self.stage or {}).get("sessionId") == guard.stage
+        )
+
+    def _require_current(self):
+        if not self._current():
+            raise asyncio.CancelledError("superseded dialogue turn")
+
+    def _speech_guard(self):
+        guard = CURRENT_TURN.get()
+        if guard is None:
+            return None
+        epoch, stage = guard.epoch, guard.stage
+        return lambda: (self.dialogue.epoch == epoch
+                        and (self.stage or {}).get("sessionId") == stage)
+
+    def _stage_changed(self):
+        self.dialogue.sync((self.stage or {}).get("sessionId"), list(self.dialogue.targets.values()))
+        guard = CURRENT_TURN.get()
+        if guard:
+            guard.stage = self.dialogue.stage
+
+    def _pause_for_input(self):
+        # Hearing is not a semantic cancellation. Hold the execution boundary
+        # while a new utterance is classified; backchannels release this hold.
+        self._input_serial += 1
+        self._input_ready.clear()
+        if self._judging and not self._judging.done():
+            self._judging.cancel()
+
+    def _invalidate_unresolved_input(self):
+        self.dialogue.begin()
+        if self.dialogue.pending:
+            self.dialogue.pending.offered = False
+        active = self._active_work
+        if active and active is not asyncio.current_task() and not active.done():
+            active.cancel()
+
+    def _settle_duplicate_input(self):
+        # A final replay contributes no new semantic turn. It may release a
+        # hearing pause, but never overtake a genuinely active classifier/hold.
+        if self._held is None and (not self._judging or self._judging.done()):
+            self._input_ready.set()
+
+    async def empty_input_stopped(self):
+        """An ended input turn with no final text has no semantic permission.
+
+        The aggregator emits no context frame for this case. Settle its hearing
+        pause without treating it as a backchannel or overtaking a real pending
+        classifier/continuation fragment.
+        """
+        if self._held is not None or (self._judging and not self._judging.done()):
+            return False
+        if self._input_ready.is_set():
+            return False
+        self._invalidate_unresolved_input()
+        self._input_ready.set()
+        await emit(self, "dialogue", reason="empty_input_stopped", operation="silent")
+        return True
+
+    def _schedule_dialogue(self, text, frame, direction, key=None):
+        if not self.dialogue.accept(key):
+            return False
+        self._pause_for_input()
+        self._handler = asyncio.create_task(self._handle_turn(text, frame, direction, self._input_serial))
+        self._judging = self._handler
+        return True
+
+    async def _dialogue_turn(self, text, frame, direction, serial=None):
+        from manager import INTENTS, note
+        if serial is None:
+            self._pause_for_input()
+            serial = self._input_serial
+        guard = TurnGuard(self.dialogue.epoch, (self.stage or {}).get("sessionId"))
+        token = CURRENT_TURN.set(guard)
+        t0 = time.monotonic()
+        settled = False
+        try:
+            targets = await self._targets()
+            self._require_current()
+            self.dialogue.sync(guard.stage, targets)
+            state = judgment_state(text, self.dialogue.snapshot())
+            answers = await self._jev.ask(state, build_questions(INTENTS, targets))
+            self._require_current()
+            if serial != self._input_serial:
+                raise asyncio.CancelledError("newer transcript being judged")
+            # Preview without mutations to decide whether this utterance should
+            # supersede ongoing work. Silence never destroys an active answer.
+            preview = deepcopy(self.dialogue).decide(text, answers, self.dialogue.epoch)
+            if preview.op != "silent":
+                guard.epoch = self.dialogue.begin()
+                active = self._active_work
+                if active and active is not asyncio.current_task() and not active.done():
+                    active.cancel()
+                self._active_work = asyncio.current_task()
+                decision = self.dialogue.decide(text, answers, guard.epoch)
+            else:
+                decision = preview
+            settled = True
+            self._judging = None
+            self._input_ready.set()
+            self.dialogue.remember(text, chosen(answers, "act"), decision)
+            milliseconds = round((time.monotonic() - t0) * 1000)
+            fields = dict(intent=chosen(answers, "act"), reason=decision.reason,
+                          response=decision.response, ms=milliseconds, epoch=guard.epoch)
+            await emit(self, "dialogue", **fields, operation=decision.op,
+                       target=decision.target, pending=decision.pending_id, answers=answers)
+            await emit(self, "listening" if decision.op == "silent" else "addressed",
+                       **fields, text=text[:120])
+            note("you", text, "silent" if decision.op == "silent" else "understood")
+            if decision.op != "silent":
+                self.addressed += 1
+            await self._execute_decision(decision, frame, direction)
+        finally:
+            if serial == self._input_serial:
+                if not settled:
+                    # An unclassified interruption might be a cancellation. Do
+                    # not reopen an old dispatch boundary as if it were an ack.
+                    self._invalidate_unresolved_input()
+                self._input_ready.set()
+            CURRENT_TURN.reset(token)
+
+    async def _execute_decision(self, decision, frame, direction):
+        self._require_current()
+        if decision.op == "silent":
+            return
+        if decision.op == "mute":
+            # Delegate audio interruption to the existing framework/native paths.
+            await self.broadcast_interruption()
+            await self._do_mute("", frame, direction)
+        elif decision.op in {"say", "clarify"}:
+            # Offering happens after delivery to speech, not at proposal creation.
+            offered = await self._say(decision.text, response_mode=decision.response)
+            self._require_current()
+            if offered is True:
+                self.dialogue.mark_offered(decision.pending_id)
+        elif decision.op == "dispatch":
+            await self._dialogue_dispatch(decision)
+        elif decision.op == "answer":
+            await self._dialogue_answer(decision, frame, direction)
+
+    async def _dialogue_dispatch(self, decision):
+        from manager import TBASE
+        from tools import _run
+        await self._input_ready.wait()
+        self._require_current()
+        targets = await self._targets()
+        await self._input_ready.wait()
+        self._require_current()
+        self.dialogue.sync((self.stage or {}).get("sessionId"), targets)
+        if (decision.route == "start_agent"
+                and self.dialogue.targets.get(decision.target, {}).get("cwd") != decision.text):
+            self.dialogue.pending = None
+            await self._say("That launch directory changed. Please request it again.")
+            return
+        action = self.dialogue.commit(decision)
+        if action is None:
+            await self._say("That request is no longer ready to send. Please state it again.")
+            return
+        # Crossing this boundary is irreversible. A new user turn can cancel its
+        # receipt, but cannot claim the subprocess never ran or replay it.
+        async def deliver():
+            try:
+                if decision.route == "start_agent":
+                    code, out = await _run(TBASE, "new", action.text, "--wait-live", timeout=60)
+                    action.status = "sent" if code == 0 and "registered:" in out else "unknown"
+                else:
+                    code, _ = await _run(TBASE, "send", action.target, action.text)
+                    action.status = {0: "sent", 2: "not_sent", 3: "waiting",
+                                     4: "not_sent", 5: "failed"}.get(code, "unknown")
+            except Exception:
+                code, action.status = -1, "unknown"
+            await emit(None, "dialogue", reason="delivery_result", action=action.id,
+                       target=action.target, status=action.status, exit=code)
+            return action.status
+        task = asyncio.create_task(deliver())
+        self._deliveries.add(task)
+        task.add_done_callback(self._deliveries.discard)
+        status = await asyncio.shield(task)
+        self._require_current()
+        if status == "sent":
+            await self._earcon("dispatched")
+        line = {
+            "sent": "Stop request sent." if decision.route == "stop_agent" else "Sent.",
+            "not_sent": "The request was not sent.",
+            "waiting": "Delivery is waiting. It has not been confirmed sent.",
+            "failed": "Delivery failed. I have not retried.",
+            "unknown": "Delivery status is unknown. I will not retry automatically.",
+        }[status]
+        if decision.route == "start_agent" and status == "sent":
+            line = "New agent registered."
+        await self._say(line, response_mode="receipt")
+
+    async def _dialogue_answer(self, decision, frame, direction):
+        from manager import RUNG_FOR
+        target = decision.target
+        route = decision.route
+        if decision.recorded_text:
+            if decision.response == "exact_command":
+                try:
+                    value = ExactValue("command", decision.recorded_text)
+                except ValueError:
+                    await self._say("That unsent request cannot be read as one exact command.")
+                    return
+                await self._say(value.value, exact=value)
+            else:
+                prefix = {"last_sent_request": "Sent request: ",
+                          "recorded_command": "Recorded command: "}.get(decision.reason, "Unsent request: ")
+                await self._say(prefix + decision.recorded_text, response_mode=decision.response)
+            return
+        if route == "invite_next":
+            await self._do_invite_next(decision.text, frame, direction)
+            return
+        if route in {"teach", "speak"}:
+            await getattr(self, "_do_" + route)(decision.text, frame, direction)
+            return
+        if route == "summarize_recent":
+            briefs = await self._recent_briefs()
+            self._require_current()
+            answer = await self._brain.plain(
+                "Summarize these recorded briefs without claiming any actions.", [str(b) for b in briefs])
+            self._require_current()
+            await self._say(answer, response_mode="summary")
+            return
+        if not target or target not in self.dialogue.targets:
+            await self._say("Which agent are you asking about?")
+            return
+        if decision.response.startswith("exact_"):
+            await self._exact_value(decision.response.removeprefix("exact_"), target)
+            return
+        brief = await self._brief(target)
+        self._require_current()
+        if not brief or brief.get("sessionId") != target:
+            await self._say("That session has no matching notes to answer from.")
+            return
+        mode = "detail" if decision.response == "detail" else "summary"
+        kind = RUNG_FOR.get(route)
+        rung = next((r for r in brief.get("rungs", []) if r.get("kind") == kind), None)
+        if rung and mode != "detail":
+            answer = rung["spoken"]
+        else:
+            answer = await self._brain.answer(decision.text, brief, self._recent, mode=mode)
+        self._require_current()
+        delivered = await self._say(answer or "The notes don't say.", response_mode=mode)
+        self._require_current()
+        # Only a recorded proposal that was actually presented is a referent.
+        if delivered is True and kind == "solution" and rung and brief.get("proposal"):
+            self.dialogue.offer_proposal(brief["proposal"], target)
+
+    async def _close_dialogue(self):
+        self.dialogue.begin()
+        if self._held_task:
+            self._held_task.cancel()
+        self._input_ready.set()
+        for task in (self._handler, self._active_work, self._judging):
+            if task and not task.done():
+                task.cancel()
+        # Observe already committed sends; never turn shutdown into a retry.
+        if self._deliveries:
+            await asyncio.gather(*tuple(self._deliveries), return_exceptions=True)

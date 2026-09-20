@@ -18,6 +18,8 @@ import httpx
 from loguru import logger
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     LLMContextFrame,
     StartFrame,
@@ -26,6 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from calls import record
+from dialogue_manager import DialogueManagerMixin
 from events import emit
 from exact_speech import ExactSpeakFrame
 from exact_values import EXACT_INTENTS, exact_request, recorded_value
@@ -257,14 +260,15 @@ class Brain:
             logger.warning(f"transcript read failed: {e}")
         return "\n".join(parts)[-limit:]
 
-    async def answer(self, question: str, brief: dict, recent: list[str]) -> str:
+    async def answer(self, question: str, brief: dict, recent: list[str], mode: str = "summary") -> str:
         facts = {k: brief.get(k) for k in ("goal", "recap", "proposal", "findings", "solution", "why", "lastAssistantMessage")}
         tail = self.transcript_tail(brief.get("transcriptPath"))
         msgs = [
             {"role": "system", "content": (
                 "You are a coding-agent session answering its supervisor aloud, in first person "
-                "plural ('we'). Answer ONLY from the facts given. One or two sentences, 30 words "
-                "max, no lists, no markdown. If the facts do not say, say so in one sentence. "
+                "plural ('we'). Answer ONLY from the facts given. "
+                + ("Four to six sentences, 120 words max. " if mode == "detail" else "One or two sentences, 30 words max. ")
+                + "No lists or markdown. If the facts do not say, say so in one sentence. "
                 "Spoken, so never say an id, hash, path, URL, branch or file name; say 'the file', "
                 "'the branch', 'the PR', 'PR five forty-seven'. You answer questions; you cannot perform "
                 "actions and must never claim to (no 'opening', 'sending', 'doing it now').")},
@@ -272,13 +276,13 @@ class Brain:
                                         f"The end of the session's transcript:\n{tail}\n\n"
                                         f"The exchange so far (you = the supervisor):\n" + "\n".join(exchange_lines()) + f"\n\nQuestion: {question}"},
         ]
-        body = {"model": self.model, "messages": msgs, "max_tokens": 400, "temperature": 0.3}
+        body = {"model": self.model, "messages": msgs, "max_tokens": 650 if mode == "detail" else 400, "temperature": 0.3}
         t0 = time.monotonic()
         r = await self._client.post("/chat/completions", json=body)
         r.raise_for_status()
         record("brain", body, r.json(), ms=int((time.monotonic() - t0) * 1000))
         text = (r.json()["choices"][0]["message"].get("content") or "").strip()
-        return " ".join(text.split())[:600]
+        return " ".join(text.split())[:1800 if mode == "detail" else 600]
 
 
     async def plain(self, question: str, exchange: list[str]) -> str:
@@ -318,18 +322,17 @@ class Brain:
         return (r.json()["choices"][0]["message"].get("content") or "").strip()
 
 
-class Manager(FrameProcessor):
+class Manager(DialogueManagerMixin, FrameProcessor):
     def __init__(self, jev: JevClient):
         super().__init__()
         self._jev = jev
         self._brain = Brain()
+        self._init_dialogue()
         seed_exchange()
         self._recent: list[str] = []
         self.stage: dict | None = None
-        self.pending: dict | None = None  # a confirmation waiting for yes/no
         self.heard = 0
         self.addressed = 0
-        self._bot_stopped = asyncio.Event()
         self._voice = asyncio.Lock()        # one voice at a time, manager or agent
         self._held: str | None = None       # a turn that ended mid-sentence, waiting for its rest
         self._held_task: asyncio.Task | None = None
@@ -339,27 +342,38 @@ class Manager(FrameProcessor):
 
     async def hearing(self):
         """The user started speaking: the orb shows it before any verdict."""
+        self._pause_for_input()
         await emit(self, "hearing")
 
     # -- pipeline entry ------------------------------------------------------------
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+        if isinstance(frame, (CancelFrame, EndFrame)):
+            await self._close_dialogue()
         if isinstance(frame, StartFrame):
             # The pipeline is running and the mic is open: now it is listening.
             await emit(None, "ready")
         if isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_stopped.set()
+            # Generic stop has no context ID: orb state only, never delivery proof.
             await emit(None, "quiet")  # the manager's voice stopped; the orb goes back to rest
         if not isinstance(frame, LLMContextFrame):
             await self.push_frame(frame, direction)
             return
-        if frame.speculation:
+        if direction != FrameDirection.DOWNSTREAM or frame.speculation:
             return
         text = _last_user_text(frame)
         if not text:
-            await self.push_frame(frame, direction)
+            self._invalidate_unresolved_input()
+            self._input_ready.set()
             return
+        messages = frame.context.get_messages()
+        users = [m for m in messages if m.get("role") == "user"]
+        key = str(len(users)) + ":" + text
+        if not self.dialogue.accept(key):
+            self._settle_duplicate_input()
+            return
+        self._pause_for_input()
         # A turn cut mid-sentence (no terminal punctuation) waits up to 1.2 s for
         # its continuation; the two are judged as one. 16:58:32: "…the risks,
         # tradeof" / "uncertainties we're still facing" were judged separately
@@ -372,29 +386,28 @@ class Manager(FrameProcessor):
             logger.info(f"joined turn: {text[:80]}")
         if not text.rstrip().endswith((".", "?", "!")) and len(text.split()) > 3:
             self._held = text
-            self._held_task = asyncio.create_task(self._release_held(frame, direction))
+            self._held_task = asyncio.create_task(self._release_held(frame, direction, self._input_serial))
             return
         self.heard += 1
         # The handler runs detached: an interruption cancels the frame task it
         # started from, and an invite that dies between "Inviting…" and the hear
         # verb leaves nobody speaking (16:49:39).
-        self._handler = asyncio.create_task(self._handle_turn(text, frame, direction))
+        self._schedule_dialogue(text, frame, direction)
         self._recent.append(text)
 
-    async def _release_held(self, frame, direction):
+    async def _release_held(self, frame, direction, epoch):
         await asyncio.sleep(1.2)
+        if epoch != self._input_serial:
+            return
         text, self._held = self._held, None
         if text:
             self.heard += 1
-            self._handler = asyncio.create_task(self._handle_turn(text, frame, direction))
+            self._schedule_dialogue(text, frame, direction)
             self._recent.append(text)
 
-    async def _handle_turn(self, text, frame, direction):
+    async def _handle_turn(self, text, frame, direction, epoch=None):
         try:
-            if self.pending:
-                await self._resolve_pending(text, frame, direction)
-            else:
-                await self._turn(text, frame, direction)
+            await self._dialogue_turn(text, frame, direction, epoch)
         except FileNotFoundError as e:  # a read door is missing: say so, never infer
             logger.error(f"manager read failed: {e}")
             await emit(self, "error", reason=str(e)[:160])
@@ -404,52 +417,7 @@ class Manager(FrameProcessor):
             await emit(self, "error", reason=str(e)[:160])
 
     async def _turn(self, text, frame, direction):
-        t0 = time.monotonic()
-        p, intent_answer = await self._jev.turn(text, self._recent, self.stage)
-        ms = int((time.monotonic() - t0) * 1000)
-        intent = _chosen(intent_answer)
-        exact_kind = exact_request(text)
-        if exact_kind:
-            intent = "exact_" + exact_kind
-        low = text.lower()
-        if not exact_kind and re.match(r"^(?:tranquility[, :]*)?(?:please\s+)?send\b", low) and any(w in low for w in ("message", "to this agent", "to the agent", "to it")):
-            intent = "send_message"  # the words say so; Jev's tie-break does not
-        if not self.stage and intent in RUNG_FOR:
-            # "What's next?" with nobody on stage is the ⌃⌥ question: the next
-            # agent's update, not a lecture about the stage being empty.
-            intent = "invite_next"
-        raw_p = p
-        rule = None
-        if names_the_manager(text):
-            p, rule = max(p, 0.95), "named"  # the transcriber's spelling is not a veto
-        elif intent in COMMANDS and float(intent_answer.get("confidence", 0)) >= 0.9 and p >= 0.3:
-            p, rule = max(p, 0.6), "fleet command"  # nobody else can execute it
-        elif (self.stage and intent in STAGE_QUESTIONS
-              and float(intent_answer.get("confidence", 0)) >= 0.8 and p >= 0.3):
-            p, rule = max(p, 0.6), "about the stage"  # a question about the work on stage
-        await emit(self, "jev", ms=self._jev.last.get("ms"), state=self._jev.last.get("state"),
-                   answers=self._jev.last.get("answers"), raw_p=round(raw_p, 2), rule=rule)
-        speak = p >= THRESHOLD
-        logger.info(f"gate p={p:.2f} {intent} {ms}ms {'SPEAK' if speak else 'silent'} :: {text[:80]}")
-        note("you", text, "acted" if speak else "silent")
-        await emit(self, "addressed" if speak else "listening",
-                   p=round(p, 2), intent=intent if speak else None, ms=ms, text=text[:120])
-        if not speak:
-            return
-        self.addressed += 1
-        # The activation cue covers latency you would otherwise fill by repeating
-        # yourself. An invite or a rung speaks within a second; a cue there lands
-        # on top of the voice. Only the slow intents get one.
-        if intent in SLOW_INTENTS:
-            await self._earcon("listening")
-        if intent in EXACT_INTENTS:
-            await self._exact_value(intent.removeprefix("exact_"))
-            return
-        handler = getattr(self, f"_do_{intent}", None)
-        if handler:
-            await handler(text, frame, direction)
-        else:
-            await self._llm(frame, direction, text, intent)
+        await self._dialogue_turn(text, frame, direction)
 
     # -- intents handled without the LLM ---------------------------------------------
 
@@ -464,10 +432,13 @@ class Manager(FrameProcessor):
 
     async def _do_invite_next(self, text, frame, direction):
         nxt = await self._next_session()
+        await self._input_ready.wait()
+        self._require_current()
         if not nxt:
             await self._say("Nobody is waiting, and I see no live sessions.")
             return
         self.stage = nxt
+        self._stage_changed()
         await emit(self, "stage", session=nxt["sessionId"], goal=nxt.get("goal"),
                    name=nxt.get("name"), project=nxt.get("project"))
         who = nxt.get("name") or nxt.get("project") or "the next agent"
@@ -476,7 +447,7 @@ class Manager(FrameProcessor):
         brief = await self._brief(nxt["sessionId"])
         spoken = " ".join(x for x in ((brief or {}).get("recap"), (brief or {}).get("proposal")) if x)
         await emit(self, "speaking", voice="agent", session=nxt["sessionId"], text=spoken[:200])
-        note(nxt.get("name") or nxt.get("goal") or nxt["sessionId"][:8], spoken or "(no brief stored)", "spoken")
+        note(nxt.get("name") or nxt.get("goal") or nxt["sessionId"][:8], spoken or "(no brief stored)", "queued_native")
         await self._app_speaks(f"{SCHEME}://hear?session={nxt['sessionId']}", spoken or "x " * 20)
 
     async def _do_rung_goal(self, t, f, d): await self._rung("goal", t, f, d)
@@ -498,44 +469,32 @@ class Manager(FrameProcessor):
         # The session speaks its own rung: a speak-only deep link into the app.
         await emit(self, "speaking", voice="agent", session=self.stage["sessionId"],
                    rung=kind, text=rung["spoken"][:160])
-        note(self.stage.get("name") or self.stage.get("goal") or self.stage["sessionId"][:8], rung["spoken"], "spoken")
+        note(self.stage.get("name") or self.stage.get("goal") or self.stage["sessionId"][:8], rung["spoken"], "queued_native")
         await self._app_speaks(f"{SCHEME}://rung?session={self.stage['sessionId']}&kind={kind}", rung["spoken"])
 
-    async def _exact_value(self, kind: str):
+    async def _exact_value(self, kind: str, session_id: str | None = None):
         """Read-only terminal route: no answer model, command dispatch, or app sanitizer."""
-        if not self.stage:
+        if not session_id and not self.stage:
             await self._say("Nobody is on stage yet. Say invite the next agent.")
             return
-        sid = self.stage["sessionId"]
+        sid = session_id or self.stage["sessionId"]
         targets = await self._targets()
+        self._require_current()
         hits = [t for t in targets if t.get("sessionId") == sid]
         if len(hits) != 1:
             await self._say("I can't verify that session's exact value right now.")
             return
         brief = await self._brief(sid) if kind in {"branch", "command"} else {}
+        self._require_current()
         value = recorded_value(kind, hits[0], brief or {})
         if value is None:
             await self._say("The session's record doesn't give that exact value.")
             return
         if kind in {"branch", "command"}:
             await self._say("Last reported " + kind + ":")
-        await self._say(value.value, exact=value)
-
-    async def _do_custom(self, text, frame, direction):
-        if not self.stage:
-            await self._llm(frame, direction, text, "custom")
-            return
-        # An instruction to the session on stage is typed in; a question is answered.
-        try:
-            p_action = await self._jev.is_action(text, self.stage.get("name") or self.stage.get("goal") or "")
-        except Exception as e:
-            logger.warning(f"is_action failed: {e}")
-            p_action = 0.0
-        if p_action >= 0.5:
-            await emit(self, "addressed", p=1.0, intent="send_message", ms=0, text=text[:120])
-            await self._do_send_message(text, frame, direction)
-            return
-        await self._answer_about_stage(text, await self._brief(self.stage["sessionId"]))
+        delivered = await self._say(value.value, exact=value)
+        if delivered is True and kind == "command" and hasattr(self, "dialogue"):
+            self.dialogue.command(value.value, sid)
 
     async def _answer_about_stage(self, question: str, brief: dict | None):
         """A question about the session on stage: one completion from its brief,
@@ -557,7 +516,7 @@ class Manager(FrameProcessor):
             return
         answer = spoken(answer)
         await emit(self, "speaking", voice="agent", session=sid, text=answer[:160])
-        note(self.stage.get("name") or self.stage.get("goal") or sid[:8], answer, "spoken")
+        note(self.stage.get("name") or self.stage.get("goal") or sid[:8], answer, "queued_native")
         await self._app_speaks(f"{SCHEME}://say?session={sid}&text={quote(answer)}", answer)
 
     CAPABILITIES = ("Say what's next to hear the next agent. Ask for the goal, findings, next step "
@@ -605,111 +564,49 @@ class Manager(FrameProcessor):
         else:
             await self._say("Listening. Nobody is waiting on you. Say what's next, or name a project.")
 
-    # -- intents that need the LLM, with the stage handed over as a note ---------------
-
-    async def _do_send_message(self, text, frame, direction):
-        if self.stage:
-            # The stage is the target. Compose from the developer's words and send;
-            # no tool-choosing model in the loop to ask which project.
-            try:
-                message = await self._brain.compose_message(text, exchange_lines(12))
-            except Exception as e:
-                logger.error(f"compose failed: {e}")
-                await emit(self, "error", reason=f"compose: {str(e)[:120]}")
-                await self._say("I couldn't put that message together.")
-                return
-            if not message:
-                await self._say("I don't have a message to send. Say it, then say send.")
-                return
-            await emit(self, "speaking", voice="manager", text=f"message: {message[:160]}")
-            note("Tranquility", f"(typing into {self.stage.get('goal') or 'the stage'}) {message}", "acted")
-            await self._send(self.stage["sessionId"], message)
-            return
-        live = await self._targets()
-        if not live:
-            await self._say("I see no live sessions to send to.")
-            return
-        choice = await self._jev.target(text, live)
-        ranked = sorted(choice.get("probabilities", {}).items(), key=lambda kv: -kv[1]) or [(_chosen(choice), 1.0)]
-        self.pending = {"kind": "target", "text": text, "ranked": ranked, "live": {c["sessionId"]: c for c in live}, "index": 0}
-        await self._ask_confirm()
-
-    async def _ask_confirm(self):
-        sid, _ = self.pending["ranked"][self.pending["index"]]
-        c = self.pending["live"][sid]
-        q = f"To {c.get('name') or c.get('goal') or c['project']}?"
-        self.pending["question"] = q
-        await self._say(q)
-
-    async def _resolve_pending(self, text, frame, direction):
-        answer = _chosen(await self._jev.confirm(text, self.pending["question"]))
-        await emit(self, "addressed", p=1.0, intent=f"confirm:{answer}", ms=0, text=text[:120])
-        if answer == "yes":
-            sid, _ = self.pending["ranked"][self.pending["index"]]
-            self.stage = self.pending["live"][sid]
-            msg = self.pending["text"]
-            self.pending = None
-            await self._send(sid, msg)
-        elif answer == "no":
-            self.pending["index"] += 1
-            if self.pending["index"] >= len(self.pending["ranked"]):
-                self.pending = None
-                await self._say("Out of candidates. Name the project and I will send it.")
-            else:
-                await self._ask_confirm()
-        else:
-            self.pending = None
-            await self._turn(text, frame, direction)
-
-    async def _send(self, session_id: str, text: str):
-        code, out = await _run(TBASE, "send", session_id, text)
-        meaning = {0: "sent", 2: "not dispatched", 3: "deferred", 4: "ambiguous", 5: "failed"}.get(code, "unknown")
-        await emit(self, "tool", argv=["tbase", "send", session_id[:8]], exit=code, meaning=meaning)
-        if code == 0:
-            await self._earcon("dispatched")
-            await self._say(os.getenv("TB_SENT_LINE", "Sent. What's next?"))
-        else:
-            await self._say(f"Not sent: {meaning}.")
-
-    async def _llm(self, frame, direction, text, intent, brief=None):
-        note = {"intent": intent, "stage": self.stage and {
-            "sessionId": self.stage["sessionId"], "goal": self.stage.get("goal"),
-            "project": self.stage.get("project")}}
-        if self.stage and intent == "custom":
-            brief = brief or await self._brief(self.stage["sessionId"])
-            if brief:
-                note["brief"] = {k: brief.get(k) for k in ("goal", "recap", "proposal", "findings", "solution", "why", "lastAssistantMessage")}
-                note["instruction"] = "Answer the question from this brief in the session's own voice via say_as_session, 30 words max."
-        if intent == "send_message" and self.stage:
-            note["instruction"] = ("Call send_message with the stage sessionId now; do not ask "
-                                   "which session. Then confirm in one clause.")
-        if intent == "summarize_recent":
-            note["recent"] = await self._recent_briefs()
-        frame.context.add_message({"role": "developer", "content": "manager note: " + json.dumps(note)})
-        await emit(self, "speaking", intent=intent, stage=(self.stage or {}).get("goal"))
-        await self.push_frame(frame, direction)
-
     # -- doors ----------------------------------------------------------------------
 
-    async def _say(self, text: str, voice: str = "manager", session: str | None = None, *, exact=None):
-        """The manager's voice. Holds the voice lock until its own speech stops,
-        so nothing else can start talking over it."""
-        async with self._voice:
-            await emit(self, "speaking", voice=voice, session=session, text=text[:160])
-            self._bot_stopped.clear()
-            # The synthesizer notes the line when it speaks it (tts.py), so every
-            # path the manager's voice takes lands in the transcript exactly once.
-            await self.push_frame(ExactSpeakFrame(text=text, value=exact) if exact is not None else TTSSpeakFrame(text))
-            try:
-                await asyncio.wait_for(self._bot_stopped.wait(), 12.0)
-            except TimeoutError:
-                pass
+    async def _say(self, text: str, voice: str = "manager", session: str | None = None, *, exact=None, response_mode="summary"):
+        """Wait for correlated output completion, not a shared bot-stop event.
+
+        At most one restart after a semantic backchannel interrupted playback.
+        This proves transport output, never human hearing or acknowledgment.
+        """
+        from exact_speech import DialogueSpeakFrame
+        for attempt in range(2):
+            await self._input_ready.wait()
+            async with self._voice:
+                self._require_current()
+                await emit(self, "speaking", voice=voice, session=session, text=text[:160])
+                guard = self._speech_guard()
+                delivery = self.deliverybook.create(text, current=guard)
+                self._last_delivery = delivery
+                speech = (ExactSpeakFrame(text=text, value=exact, current=guard, delivery=delivery)
+                          if exact is not None else DialogueSpeakFrame(
+                              text=text, current=guard, response_mode=response_mode, delivery=delivery))
+                try:
+                    await self.push_frame(speech)
+                    timeout = min(60.0, max(12.0, 2 + 0.5 * len(text.split()), 0.07 * len(text)))
+                    completed = await self.deliverybook.wait(delivery, timeout)
+                except asyncio.CancelledError:
+                    self.deliverybook.finish(delivery, "interrupted", "turn_superseded")
+                    raise
+                if completed:
+                    note("Tranquility", delivery.generated_text or text, "output_complete")
+                    return True
+            if delivery.status != "interrupted" or attempt or not self._current():
+                return False
+            await self._input_ready.wait()
+            self._require_current()
+        return False
 
     async def _app_speaks(self, url: str, text: str):
         """A session speaks through the app. Hold the voice lock and mute the mic
         for the line's estimated length: the app's voice is echo to this mic."""
         secs = min(20.0, 1.2 + 0.42 * len(text.split()))
+        await self._input_ready.wait()
         async with self._voice:
+            self._require_current()
             EXTERNAL_UNTIL["t"] = time.monotonic() + secs
             await _run("open", url)
             await asyncio.sleep(secs)

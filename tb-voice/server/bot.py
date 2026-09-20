@@ -47,6 +47,7 @@ from llm import RecordedLLMService
 from manager import JevClient, Manager
 from mute import WhileBotSpeaksMuteStrategy
 from prompt import SYSTEM
+from speech_delivery import OutputDeliveryObserver
 from tools import SCHEMAS
 from tts import SpokenGradiumTTSService
 
@@ -103,10 +104,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     )
 
     gate = Manager(JevClient(os.environ["JEV_API_KEY"]))
+    tts.deliverybook = gate.deliverybook
 
     @user_aggregator.event_handler("on_user_turn_started")
     async def on_user_turn_started(aggregator, *args):
         await gate.hearing()
+
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message):
+        # Pipecat emits this event even when empty final content produces no
+        # LLMContextFrame. Without it a hearing pause could remain latched.
+        if not (message.content or "").strip():
+            await gate.empty_input_stopped()
 
     pipeline = Pipeline(
         [
@@ -117,6 +126,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             llm,
             tts,
             transport.output(),
+            OutputDeliveryObserver(gate.deliverybook),
             assistant_aggregator,
         ]
     )
@@ -167,7 +177,6 @@ async def bot(runner_args: RunnerArguments):
 async def run_local():
     """Hosted by the app (or `--local`): the Mac's mic and speakers, no browser.
     The runner has no local transport, so this builds one and calls run_bot."""
-    import asyncio
 
     from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
