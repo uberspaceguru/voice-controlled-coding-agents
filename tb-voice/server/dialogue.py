@@ -81,6 +81,7 @@ class Dialogue:
         self._consumed: set[int] = set()
         self._committed_epochs: set[int] = set()
         self._clarification_key: tuple | None = None
+        self._clarification_exhausted = False
 
     def begin(self, key: str | None = None) -> int | None:
         if not self.accept(key):
@@ -201,12 +202,17 @@ class Dialogue:
             key = (decision.reason, decision.target, self.pending.text if self.pending else decision.text)
             if key == self._clarification_key:
                 self.pending = None
-                decision = self._receipt("I couldn't resolve that request. Nothing was sent; please state it again.", "clarification_exhausted")
-                self._clarification_key = None
+                if self._clarification_exhausted:
+                    decision = Decision("silent", "clarification_exhausted", epoch=epoch)
+                else:
+                    decision = self._receipt("I couldn't resolve that request. Nothing was sent; please state it again.", "clarification_exhausted")
+                    self._clarification_exhausted = True
             else:
                 self._clarification_key = key
+                self._clarification_exhausted = False
         elif decision.op != "silent":
             self._clarification_key = None
+            self._clarification_exhausted = False
         decision.stage = self.stage
         decision.source = chosen(answers, "source")
         return decision
@@ -244,6 +250,15 @@ class Dialogue:
             # repairing an exact question must not turn agreement on reading
             # into silence. Keep correction semantics; this authorizes no work.
             act_p = probability(answers, "act", "inform") + probability(answers, "act", "correct")
+        if (act == "control" and route == "stop_speaking"
+                and act_p >= 0.70 and probability(answers, "route", "stop_speaking") >= 0.85
+                and execute <= 0.20 and chosen(answers, "target") == "none"
+                and probability(answers, "target", "none") >= 0.70
+                and source == "utterance" and probability(answers, "source", "utterance") >= 0.70):
+            # Withdrawing attention can lower addressedness while explicitly
+            # asking this voice to stop. This protective control grants no work.
+            # Quoted/side speech must still be classified as think, not control.
+            return Decision("mute", "explicit_stop_speaking", epoch=epoch)
         if addressed < READ_THRESHOLD or act_p < READ_THRESHOLD:
             return Decision("silent", "not_addressed_or_uncertain", epoch=epoch)
         if self.listening == "paused" and route not in {"resume_listening", "stop_speaking", "cancel"} and act != "cancel":
@@ -254,7 +269,7 @@ class Dialogue:
             return Decision("answer", "conversation_resume", "detail", text, target or self.stage,
                             route, epoch=epoch)
 
-        if act in {"direct", "inform", "control"} and route in {"invite_next", "teach", "speak", "summarize_recent"}:
+        if act in {"direct", "inform", "control"} and route in {"invite_next", "teach", "speak", "summarize_recent", "fleet_inventory", "fleet_count", "manager_status"}:
             if probability(answers, "route", route) >= 0.75:
                 self.pending = None
                 return Decision("answer", "manager_information", response, text, target, route, epoch=epoch)
@@ -407,7 +422,13 @@ class Dialogue:
                 record = getattr(self, source)
                 if record and record.target in self.targets and self.clock() - record.created <= REFERENCE_TTL:
                     target = record.target
-            if chosen(answers, "target") not in {"none"} and target is None:
+            if (chosen(answers, "target") == "none" and probability(answers, "target", "none") >= 0.55
+                    and route in {"custom", "none"} and not response.startswith("exact_")):
+                # None is an intentional manager/fleet scope. It is not an
+                # ambiguous coding agent and must never enter the agent guard.
+                return Decision("answer", "manager_question", response, text, route="manager_question", epoch=epoch)
+            if target is None and (chosen(answers, "target") != "none"
+                                   or response.startswith("exact_") or route.startswith("rung_")):
                 return Decision("clarify", "information_target_ambiguous", "clarification",
                                 "Which agent are you asking about?", epoch=epoch)
             if source == "unknown":

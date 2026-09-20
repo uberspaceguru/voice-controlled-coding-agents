@@ -114,7 +114,9 @@ required before describing this as reliable conversation handling.
 ## Integration and rollback
 
 This branch builds on exact-value commit `d19c3c6` and the integrated manager
-snapshot at `9ed33a9`. It has not been activated in the user's working app.
+snapshot at `9ed33a9`. The first three feature commits were later activated by
+Yobi1 in `speech-act-live` at `20b3111`. The first-use repair below is a separate,
+unactivated increment; developing it did not change that running integration.
 
 1. In a separate integration worktree based on the intended current manager
    branch, cherry-pick the exact-value change if absent, then this milestone and
@@ -250,3 +252,103 @@ The final Python suite contains161 passing tests, including51 memory tests plus
 a regression preserving sent work when canceling a later unanswered question.
 Targeted lint and whitespace checks pass. Native runtime remains untouched;
 activation requires review of these usability limits and the integration recipe.
+
+## First-use repair: contact, fleet scope, and playback echo
+
+The first real test exposed a handler bug beyond classifier accuracy: intentional
+`target=none` fleet questions entered the individual-agent answer guard, which
+asked which agent outside the policy's clarification limiter. Contact bids were
+also treated as passive acknowledgments, and a strong stop-speech judgment was
+discarded by the general addressedness gate when the speaker withdrew attention.
+
+- Contact-opening and reception requests now use `manager_status`, returning
+  only “Yes. I received your message.” Passive receipts and side conversation
+  remain silent. This receipt proves reception of text, not microphone or speaker
+  health. The same seven-question batch supplies these judgments.
+- `fleet_count` and `fleet_inventory` read `tbase targets --json` directly with
+  no selected agent and no answer model. They distinguish verified live processes
+  from `status` activity (busy/idle/waiting/unknown) and `enrolled` for voice
+  replies. The separate `waiting` boolean is not inferred activity. Live/enrolled
+  never promises successful message delivery. Inventory names are spoken in
+  bounded chunks so the sanitizer cannot silently discard most of the list.
+- Failed, null, malformed, or invalid target reads are unavailable, not an empty
+  fleet. An intentional no-agent custom question gets a read-only current-fleet
+  snapshot through the existing text provider. Truly ambiguous individual-agent
+  questions enter the policy limiter: one clarification, one failure receipt,
+  then silence for the same unresolved issue. No agent execution threshold changed.
+- A protective stop-speech path requires agreement on current local control,
+  stop route, no agent, current utterance source, and low execution intent. It
+  uses the existing framework interruption and native mute doors without speech
+  or dispatch. Stopping a running coding task remains a separate strict send.
+- `echo.py` ports Robert's gate from cached manager revision
+  `9a009389c79a70801c48e4cea645088396e51525` between microphone input and Gradium
+  STT. It zeros PCM while bot speech is active, for its 0.6-second tail, and during
+  the existing estimated native-voice window. Gradium STT/TTS configuration and
+  correlated output delivery tracking are preserved.
+
+This is **half-duplex suppression, not acoustic echo cancellation**. Speech from
+the user, including stop commands, cannot reach STT while that gate is closed.
+The existing native mute control remains the interruption route during output.
+Audio already buffered by STT cannot be recalled. Native voice completion has no
+acknowledged stop event; its conservative estimate can keep the microphone gated
+after playback stops, or under-cover unexpectedly long speech. Opening a mute
+deep link is not proof native audio stopped, so it does not clear that estimate.
+
+### Repair validation and remaining limits
+
+All 188 Python tests pass, including 11 fleet handler tests, 6 stop-control tests,
+6 echo/provider/frame tests and 4 read-error delivery tests. Failed-read receipts
+retain a turn/stage guard after exception unwinding; a new input, stage change,
+or superseding answer cannot release late error audio. Installed Pipecat 1.11.0 transport methods emit
+paired upstream/downstream bot-start/stop frames; tests carry upstream markers
+through the installed Gradium STT processor into the gate. Synthetic microphone
+PCM becomes zero at the provider boundary while frame timing stays intact.
+Interruption, late completion markers, provider failure, timeout, and stale
+answers retain their previous delivery protections. Lint and whitespace pass.
+No native build, runtime restart, hardware audio test, or live activation occurred.
+
+The frozen synthetic first-use development/regression corpus has 16 cases run
+twice (32 paid requests, seven judgments each; no real transcripts). Policy
+matches are 30/32; contact/backchannel/side cases 8/8, fleet 8/8, stop/quoted/side
+cases 8/8, other control-scope cases 6/8. Both expected agent-stop sends matched
+target and payload; no unexpected send, false mute, unnecessary clarification,
+or unintended silent operation occurred in this sample. The two mismatches are
+the same negated-control explanation on both repetitions: act/route correctly
+select informational help, but the independent response vote says silent instead
+of detail. The handler still invokes help and speaks; detailed-answer quality was
+not measured. This disagreement remains recorded, not retuned or counted as a pass.
+
+Classifier HTTP n=32: median 157.83 ms, p95 391.26 ms. Complete synthetic routing:
+median 158.08 ms, p95 393.17 ms (nearest-rank p95). This excludes STT, text generation,
+TTS and time to first audio. Monetary cost is not metered. This increment adds no
+inference calls to the normal routing batch; uncommon general-manager fallback
+uses one existing text-generation call. Total synthetic dialogue requests are 397
+through this repair. Prior frozen usability failures remain reported above.
+
+Other limits: initial turn classification still depends on an available fleet
+read, even for a contact check. Failed reads therefore produce the unavailable
+receipt. General help/fallback generation was mocked in handler tests. Spoken
+barge-in during output and physical echo suppression require live checking; these
+tests do not establish a usable full-duplex conversation.
+
+### Activation owner and short acceptance script
+
+Yobi1 should review and cherry-pick only this repair onto clean `speech-act-live`
+at 20b3111, retaining the existing launcher, environment, Gradium providers and
+native prepared app. That directory auto-reloads, so touching its source is the
+activation step. Do not rebuild the native app or reset permissions. Re-run the
+Python suite using the existing environment before the spoken test. For rollback,
+revert the repair commit in that integration and let the manager child reload;
+retain credentials and launcher. Native build/source audit remains a later landing
+check, not performed under this runtime-preservation instruction.
+
+1. After output ends, say “Tranquility, are you there?” Expect a short receipt.
+2. With no agent selected, ask “How many agents are live?” Compare the count and
+   activity/enrollment breakdown with a contemporaneous `tbase targets --json`.
+3. Ask for their names. Then say “okay”; expect no new answer. Check transcripts
+   for the bot's own previous speech appearing as input.
+4. After output and its tail, say “I'm speaking to someone else; be quiet.” Expect
+   a mute decision, no agent send, and no further queued manager answer. During
+   playback use the native mute control; verify the actual sound stops separately.
+5. Ask a quoted/negated question about stopping. It must not mute or dispatch;
+   detailed help remains a known response-mode limitation in the synthetic sample.

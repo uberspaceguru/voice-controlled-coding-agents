@@ -1,0 +1,664 @@
+{
+  "schema_version": 1,
+  "purpose": "Synthetic first-use regression/development cases, including paraphrased observed failure classes; not held-out evidence. Tests current route/policy behavior only. Fleet liveness, activity, waiting, and enrollment are separate synthetic facts.",
+  "holdout_policy": "Development/regression corpus. Parent may run at most two repetitions (32 calls). No real user transcripts, messages, names, paths, or credentials are included. Quiet negatives require exact operation silent so a false mute cannot count as success; manager/fleet cases require their intended policy route.",
+  "fixtures": {
+    "targets": [
+      {
+        "sessionId": "saffron",
+        "name": "Saffron",
+        "goal": "Maintain search results",
+        "project": "sample-search",
+        "cwd": "/work/sample/search",
+        "status": "busy",
+        "enrolled": true,
+        "waiting": false
+      },
+      {
+        "sessionId": "nimbus",
+        "name": "Nimbus",
+        "goal": "Maintain the catalog interface",
+        "project": "sample-catalog",
+        "cwd": "/work/sample/catalog",
+        "status": "idle",
+        "enrolled": true,
+        "waiting": false
+      },
+      {
+        "sessionId": "juniper",
+        "name": "Juniper",
+        "goal": "Review the deployment checks",
+        "project": "sample-checks",
+        "cwd": "/work/sample/checks",
+        "status": "waiting",
+        "enrolled": true,
+        "waiting": true
+      },
+      {
+        "sessionId": "umber",
+        "name": "Umber",
+        "goal": "Investigate the build tools",
+        "project": "sample-build",
+        "cwd": "/work/sample/build",
+        "status": "unknown",
+        "enrolled": false,
+        "waiting": false
+      }
+    ],
+    "briefs": {},
+    "clock": {
+      "now": 4000,
+      "unit": "monotonic_seconds"
+    }
+  },
+  "conversations": [
+    {
+      "id": "first_use_contact",
+      "split": "development",
+      "tags": [
+        "regression",
+        "contact_probe",
+        "attention_bid",
+        "acknowledgment",
+        "side_conversation"
+      ],
+      "initial": {
+        "stage": null,
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "saffron",
+          "nimbus",
+          "juniper",
+          "umber"
+        ]
+      },
+      "turns": [
+        {
+          "id": "first_use_contact.1",
+          "text": "Hello there—can this manager receive me?",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "manager_status",
+            "policy_route": "manager_status"
+          }
+        },
+        {
+          "id": "first_use_contact.2",
+          "text": "I'm trying to get a response from you.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "manager_status",
+            "policy_route": "manager_status"
+          }
+        },
+        {
+          "id": "first_use_contact.3",
+          "text": "Got it, thanks.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "ack",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "operation": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        },
+        {
+          "id": "first_use_contact.4",
+          "text": "Priya, can you hear the speaker at the back?",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "operation": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "first_use_fleet",
+      "split": "development",
+      "tags": [
+        "regression",
+        "fleet_count",
+        "fleet_names",
+        "activity_not_liveness",
+        "background_plus_request"
+      ],
+      "initial": {
+        "stage": null,
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "saffron",
+          "nimbus",
+          "juniper",
+          "umber"
+        ]
+      },
+      "turns": [
+        {
+          "id": "first_use_fleet.1",
+          "text": "How many coding sessions can you see right now?",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "summary",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "fleet_count",
+            "policy_route": "fleet_count"
+          }
+        },
+        {
+          "id": "first_use_fleet.2",
+          "text": "Which of those sessions are available? Read their names.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "summary",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "fleet_inventory",
+            "policy_route": "fleet_inventory"
+          }
+        },
+        {
+          "id": "first_use_fleet.3",
+          "text": "How many are busy rather than merely open?",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "summary",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "fleet_count",
+            "policy_route": "fleet_count"
+          }
+        },
+        {
+          "id": "first_use_fleet.4",
+          "text": "The system just said it was listening. Can you list the live agents now?",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "summary",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "fleet_inventory",
+            "policy_route": "fleet_inventory"
+          }
+        }
+      ]
+    },
+    {
+      "id": "first_use_stop",
+      "split": "development",
+      "tags": [
+        "regression",
+        "withdraw_attention",
+        "stop_speech",
+        "quoted_negative",
+        "human_recipient_negative"
+      ],
+      "initial": {
+        "stage": null,
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "saffron",
+          "nimbus",
+          "juniper",
+          "umber"
+        ]
+      },
+      "turns": [
+        {
+          "id": "first_use_stop.1",
+          "text": "I'm speaking to my colleague now. Please stop your narration.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "none",
+            "source": "utterance",
+            "response": "silent",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stop_speaking",
+            "operation": "mute",
+            "dispatch_count": 0,
+            "route": "stop_speaking",
+            "policy_route": ""
+          }
+        },
+        {
+          "id": "first_use_stop.2",
+          "text": "No more commentary; quiet, please.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "none",
+            "source": "utterance",
+            "response": "silent",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "stop_speaking",
+            "operation": "mute",
+            "dispatch_count": 0,
+            "route": "stop_speaking",
+            "policy_route": ""
+          }
+        },
+        {
+          "id": "first_use_stop.3",
+          "text": "Our transcript contains the words 'stop talking', but that was yesterday.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "operation": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        },
+        {
+          "id": "first_use_stop.4",
+          "text": "Priya, stop talking over the presenter.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "target": "none",
+            "source": "unknown",
+            "response": "silent",
+            "addressed": false,
+            "execution_now": false,
+            "disposition": "silent",
+            "operation": "silent",
+            "dispatch_count": 0,
+            "route": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "first_use_control_scope",
+      "split": "development",
+      "tags": [
+        "regression",
+        "negated_control_question",
+        "stop_running_task",
+        "cancel_unsent",
+        "quoted_control_explanation"
+      ],
+      "initial": {
+        "stage": null,
+        "listening": "active",
+        "pending": null,
+        "last_action": null,
+        "last_command": null,
+        "proposal": null,
+        "candidates": [
+          "saffron",
+          "nimbus",
+          "juniper",
+          "umber"
+        ]
+      },
+      "turns": [
+        {
+          "id": "first_use_control_scope.1",
+          "text": "Would saying 'don't stop speaking' ask you to mute?",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "teach",
+            "policy_route": "teach"
+          }
+        },
+        {
+          "id": "first_use_control_scope.2",
+          "text": "Tell Saffron to stop its running test job.",
+          "context": {
+            "stage": "saffron",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "target": "saffron",
+            "source": "utterance",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": true,
+            "disposition": "dispatch_stop",
+            "operation": "dispatch",
+            "dispatch_count": 1,
+            "route": "stop_agent",
+            "dispatch_target": "saffron",
+            "dispatch_text": "Tell Saffron to stop its running test job.",
+            "policy_route": "stop_agent"
+          }
+        },
+        {
+          "id": "first_use_control_scope.3",
+          "text": "Cancel the instruction you haven't sent.",
+          "context": {
+            "stage": "saffron",
+            "listening": "active",
+            "pending": {
+              "text": "Inspect the search result cache.",
+              "target": "saffron",
+              "status": "offered",
+              "age_seconds": 3,
+              "stage_at_offer": "saffron",
+              "kind": "send"
+            },
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "cancel",
+            "target": "saffron",
+            "source": "pending",
+            "response": "receipt",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "cancel_pending",
+            "operation": "say",
+            "dispatch_count": 0,
+            "route": "none",
+            "pending_status": "cleared"
+          }
+        },
+        {
+          "id": "first_use_control_scope.4",
+          "text": "Explain the phrase 'be quiet' without muting anything.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "saffron",
+              "nimbus",
+              "juniper",
+              "umber"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "target": "none",
+            "source": "utterance",
+            "response": "detail",
+            "addressed": true,
+            "execution_now": false,
+            "disposition": "answer",
+            "operation": "answer",
+            "dispatch_count": 0,
+            "route": "custom"
+          }
+        }
+      ]
+    }
+  ]
+}

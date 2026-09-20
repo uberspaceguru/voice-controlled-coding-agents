@@ -43,6 +43,7 @@ from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
+from echo import EchoGate
 from llm import RecordedLLMService
 from manager import JevClient, Manager
 from mute import WhileBotSpeaksMuteStrategy
@@ -120,6 +121,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     pipeline = Pipeline(
         [
             transport.input(),
+            EchoGate(),
             stt,
             user_aggregator,
             gate,

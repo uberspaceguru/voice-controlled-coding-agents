@@ -121,7 +121,7 @@ def policy_observation(dialogue, turn, judgment, epoch):
         code = turn.get("delivery", {}).get("exit_code", 0)
         action.status = {0: "sent", 2: "not_dispatched", 3: "waiting", 4: "ambiguous", 5: "failed"}.get(code, "unknown")
     return {
-        "op": decision.op, "reason": decision.reason, "response": decision.response,
+        "op": decision.op, "reason": decision.reason, "response": decision.response, "route": decision.route,
         "text": decision.text, "target": decision.target,
         "recorded_text": decision.recorded_text,
         "dispatch_count": int(action is not None),
@@ -144,6 +144,10 @@ def contract_errors(turn, observed):
         if not condition:
             errors.append(message)
 
+    if "operation" in expected:
+        require(observed["op"] == expected["operation"], "operation")
+    if "policy_route" in expected:
+        require(observed.get("route") == expected["policy_route"], "policy_route")
     require(observed["dispatch_count"] == expected["dispatch_count"], "dispatch_count")
     if expected["dispatch_count"]:
         require(observed["dispatch_target"] == expected["dispatch_target"], "dispatch_target")

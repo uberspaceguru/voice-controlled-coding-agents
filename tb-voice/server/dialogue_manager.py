@@ -251,6 +251,15 @@ class DialogueManagerMixin(MemoryManagerMixin):
         from manager import RUNG_FOR
         target = decision.target
         route = decision.route
+        if route in {"fleet_inventory", "fleet_count"}:
+            await self._fleet_inventory(include_names=route == "fleet_inventory")
+            return
+        if route == "manager_status":
+            await self._say("Yes. I received your message.", response_mode="receipt")
+            return
+        if route == "manager_question":
+            await self._manager_question(decision.text)
+            return
         if route == "conversation_resume":
             await self._resume_conversation(target)
             return
@@ -285,7 +294,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
             await self._say(answer, response_mode="summary")
             return
         if not target or target not in self.dialogue.targets:
-            await self._say("Which agent are you asking about?")
+            await self._say("That agent is no longer available. Ask me to list the live agents.", response_mode="receipt")
             return
         if decision.response.startswith("exact_"):
             await self._exact_value(decision.response.removeprefix("exact_"), target, question=question)
