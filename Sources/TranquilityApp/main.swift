@@ -173,6 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var repliedToEventId: String?
     /// The one announcement allowed to exist. See `announceNext`.
     var announceTask: Task<Void, Never>?
+    var isQuitting = false
+    var quitTask: Task<Void, Never>?
     /// Manager mode (19 Sep): the stdio child, its reader, and its lamp.
     var managerTransport: ACPProcessTransport?
     var managerTask: Task<Void, Never>?
@@ -986,6 +988,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // opening on the tab that is not first is the kind of small lie that
         // makes a tab bar feel decorative.
         hud.onOpenSettings = { [weak self] in self?.hud.showAgentSettings() }
+        hud.onQuit = { NSApp.terminate(nil) }
         // The wedged card's door. The password sheet blocks the thread that
         // asks, so the ask is detached and only the outcome comes back here.
         hud.onRestartAudio = { [weak self] in
@@ -2118,6 +2121,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showIdleGrid()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if isQuitting { return .terminateLater }
+        isQuitting = true
+        // Invalidate replies before waiting for the owned microphone process.
+        // No terminal agent or tmux PID is used by this shutdown path.
+        replyGeneration += 1
+        inFlightTranscription?.task?.cancel()
+        announceTask?.cancel()
+        returnToGridWork?.cancel()
+        listeningIndicator?.cancel()
+        permissionTimer?.invalidate()
+        intakeTimer?.invalidate()
+        inFlightTimer?.invalidate()
+        hotkey?.stop()
+        recorder.takeStream()?.cancel()
+        if recorder.isRecording { recorder.abandon() }
+        coordinator?.speech.stop()
+        voicePreview.stop()
+        managerTask?.cancel()
+        managerTask = nil
+        let child = managerTransport
+        managerTransport = nil
+        guard let child else { return .terminateNow }
+        quitTask = Task { @MainActor in
+            let ended = await child.closeAndWait(timeout: 2, interruptFirst: true)
+            Permissions.log("quit: manager exit observed=\(ended)")
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // The OpenCode server this instance started goes with it (a child
         // does not die with its parent on macOS; a stale one is reaped at
@@ -2205,6 +2239,17 @@ if CommandLine.arguments.contains("--selftest-capture-diagnostics") {
     Permissions.flushLog()
     print(passed ? "capture diagnostics UI: PASS" : "capture diagnostics UI: FAIL")
     exit(passed ? 0 : 1)
+}
+
+// Isolated Quit regression: real controls, no live app services or microphone.
+if CommandLine.arguments.contains("--selftest-quit-control") {
+    let probeApplication = NSApplication.shared
+    Task { @MainActor in
+        let passed = await QuitControlDrill.run()
+        exit(passed ? 0 : 1)
+    }
+    probeApplication.run()
+    exit(1)
 }
 
 // Isolated search regression: a window and list, with no live app services.

@@ -118,9 +118,14 @@ final class StatusHUD: NSObject {
     /// on every relaunch would not be a preference, it would be a default with
     /// extra steps. See docs/ruling-the-collapsed-strip.md.
     private static let collapsedKey = "panelCollapsed"
+    private let persistWidth: Bool
+    init(persistWidth: Bool = true) {
+        self.persistWidth = persistWidth
+        super.init()
+    }
     private(set) var isCollapsed: Bool = ProductDefaults.shared.bool(forKey: StatusHUD.collapsedKey) {
         didSet {
-            ProductDefaults.shared.set(isCollapsed, forKey: StatusHUD.collapsedKey)
+            if persistWidth { ProductDefaults.shared.set(isCollapsed, forKey: StatusHUD.collapsedKey) }
             Permissions.log("panel: \(isCollapsed ? "collapsed" : "expanded")")
             Track.record(isCollapsed ? "panel_collapsed" : "panel_expanded", ["face": .token(state.name)])
         }
@@ -236,6 +241,9 @@ final class StatusHUD: NSObject {
     var voiceStack: NSStackView!
     var voiceListHeight: NSLayoutConstraint!
     var gearButton: ConsoleButton!
+    var quitButton: ConsoleButton!
+    var quitRow: NSView!
+    var onQuit: (() -> Void)?
     var collapseButton: ConsoleButton!
     /// Is the pointer on the panel at all — the signal behind the collapse
     /// control's two faces. See `PanelHoverView`.
@@ -3270,6 +3278,10 @@ final class StatusHUD: NSObject {
     static let orbConnecting = "breathing"
     lazy var managerOrb = ManagerOrbView(frame: .zero)
     var onManagerToggle: (() -> Void)?
+
+    @objc nonisolated func quitTapped() {
+        MainActor.assumeIsolated { onQuit?() }
+    }
 
     func setManager(on: Bool) {
         managerOn = on

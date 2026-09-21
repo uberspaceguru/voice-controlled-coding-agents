@@ -24,6 +24,7 @@ extension AppDelegate {
     /// playing, supersede any armed announcement, show the card, speak.
     @MainActor
     func speakForManager(session: String, spoken: SanitizedSpokenText, placard: String) {
+        guard !isQuitting else { return }
         guard let coordinator else { return }
         Permissions.log("manager: speaking \(placard) for \(session.prefix(8)): \(spoken.text.prefix(200))")
         if managerIsOn {
@@ -78,12 +79,14 @@ extension AppDelegate {
     var managerIsOn: Bool { managerTransport != nil }
 
     @objc func toggleManagerMode() {
+        guard !isQuitting else { return }
         if managerIsOn { stopManager() } else { startManager() }
         rebuildMenu()
     }
 
     @MainActor
     func startManager() {
+        guard !isQuitting else { return }
         let argv = ManagerConfig.command()
         let cwd = (argv[0] as NSString).deletingLastPathComponent
         let transport = ACPProcessTransport(command: argv, cwd: cwd,
@@ -98,10 +101,13 @@ extension AppDelegate {
         Permissions.log("manager: started \(argv.joined(separator: " "))")
         managerTask = Task { @MainActor [weak self] in
             for await line in transport.lines() {
-                guard let self, let event = ManagerEvent.parse(line) else { continue }
+                guard let self, !self.isQuitting, !Task.isCancelled,
+                      self.managerTransport === transport else { break }
+                guard let event = ManagerEvent.parse(line) else { continue }
                 self.handle(event)
             }
-            guard let self else { return }
+            guard let self, !self.isQuitting, !Task.isCancelled,
+                  self.managerTransport === transport else { return }
             let status = transport.exitStatus
             Permissions.log("manager: child ended (exit \(status.map(String.init) ?? "?"))")
             // 75 is the child's own "reload me": its source changed under it.
@@ -110,6 +116,7 @@ extension AppDelegate {
                 self.managerTransport = nil
                 self.hud.setManagerState(StatusHUD.orbState, line: "reloading")
                 try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled, !self.isQuitting else { return }
                 self.startManager()
                 return
             }

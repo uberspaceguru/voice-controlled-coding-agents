@@ -294,6 +294,24 @@ extension StatusHUD {
         gearButton.widthAnchor.constraint(equalToConstant: 26).isActive = true
         gearButton.heightAnchor.constraint(equalToConstant: 26).isActive = true
 
+        // Always present in the expanded panel, including the manager orb and
+        // speaking cards. Exiting must not depend on finding a menu-bar item.
+        quitButton = quietAction("Quit Tranquility Base", #selector(quitTapped))
+        quitButton.setAccessibilityLabel("Quit Tranquility Base")
+        quitButton.toolTip = "Stop listening and speaking, then quit the app."
+        quitButton.translatesAutoresizingMaskIntoConstraints = false
+        quitRow = NSView()
+        quitRow.translatesAutoresizingMaskIntoConstraints = false
+        quitRow.addSubview(quitButton)
+        NSLayoutConstraint.activate([
+            quitRow.widthAnchor.constraint(equalToConstant: 348),
+            quitRow.heightAnchor.constraint(equalToConstant: 28),
+            quitButton.trailingAnchor.constraint(equalTo: quitRow.trailingAnchor),
+            quitButton.centerYAnchor.constraint(equalTo: quitRow.centerYAnchor),
+            quitButton.heightAnchor.constraint(equalToConstant: 28),
+            quitButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+        ])
+
         // A breadcrumb, not a button in a row of actions: it says where you are and
         // the only way out is back the way you came.
         backButton = ConsoleButton(title: StateLegend.backTitle, target: self,
@@ -713,7 +731,7 @@ extension StatusHUD {
                                         stripRule, stripLabel, trayRow, gridFooter,
                                         countdownBar, micRow, meter,
                                         settingsTabs, agentGrid, launchRow, directoryRow,
-                                        voiceList, setupScroll, hintLabel, buttons])
+                                        voiceList, setupScroll, hintLabel, buttons, quitRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6

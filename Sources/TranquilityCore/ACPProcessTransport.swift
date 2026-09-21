@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// An ACP agent running as a child process, spoken to over its stdin/stdout.
 ///
@@ -14,6 +15,10 @@ public final class ACPProcessTransport: ACPTransport, @unchecked Sendable {
     private let toAgent = Pipe()
     private let fromAgent = Pipe()
     private let lock = NSLock()
+    private let lifecycleLock = NSLock()
+    private var started = false
+    private var closed = false
+    private var stopStage = 0
     private var continuation: AsyncStream<Data>.Continuation?
     private var buffer = Data()
 
@@ -34,13 +39,26 @@ public final class ACPProcessTransport: ACPTransport, @unchecked Sendable {
         if let environment { process.environment = environment }
     }
 
-    public func start() throws {
-        try process.run()
+    public enum StartError: Error {
+        case closed
+        case alreadyStarted
     }
 
-    /// The child's exit status once it has ended; nil while it runs.
+    public func start() throws {
+        try lifecycleLock.withLock {
+            guard !closed else { throw StartError.closed }
+            guard !started else { throw StartError.alreadyStarted }
+            try process.run()
+            started = true
+        }
+    }
+
+    /// The child's exit status once it has ended; nil before launch or while it runs.
     public var exitStatus: Int32? {
-        process.isRunning ? nil : process.terminationStatus
+        lifecycleLock.withLock {
+            guard started, !process.isRunning else { return nil }
+            return process.terminationStatus
+        }
     }
 
     public func write(_ line: Data) async throws {
@@ -88,9 +106,87 @@ public final class ACPProcessTransport: ACPTransport, @unchecked Sendable {
     }
 
     public func close() async {
+        closePipes()
+        requestStop(stage: 2)
+    }
+
+    /// Stop this transport's immediate child and observe its exit within one
+    /// total timeout. The manager opts into SIGINT for its pipeline cleanup;
+    /// ordinary transports retain TERM-first shutdown. The final quarter of
+    /// the budget is reserved for SIGKILL and observing termination.
+    ///
+    /// Never signals a process group or another session. True means the child
+    /// has exited (or was never started), not merely that a signal was sent.
+    /// False leaves the caller responsible for deciding whether it can quit.
+    /// Cancellation still attempts escalation, but cannot report an unobserved
+    /// exit as success. A nonpositive/nonfinite timeout requests shutdown without
+    /// waiting. Closing before start permanently prevents a later launch.
+    public func closeAndWait(timeout: TimeInterval = 2, interruptFirst: Bool = false) async -> Bool {
+        let start = ProcessInfo.processInfo.systemUptime
+        closePipes()
+        requestStop(stage: interruptFirst ? 1 : 2)
+        if hasExited { return true }
+        guard timeout.isFinite, timeout > 0, (start + timeout).isFinite else { return false }
+
+        if interruptFirst {
+            if await waitForExit(until: start + timeout * 0.5) { return true }
+            requestStop(stage: 2)
+        }
+        if await waitForExit(until: start + timeout * 0.75) { return true }
+        requestStop(stage: 3)
+        return await waitForExit(until: start + timeout)
+    }
+
+    private var hasExited: Bool {
+        lifecycleLock.withLock { !started || !process.isRunning }
+    }
+
+    private func closePipes() {
+        let firstClose = lifecycleLock.withLock {
+            let first = !closed
+            closed = true
+            return first
+        }
+        guard firstClose else { return }
         fromAgent.fileHandleForReading.readabilityHandler = nil
-        continuation?.finish()
+        let stream = lock.withLock {
+            let stream = continuation
+            continuation = nil
+            return stream
+        }
+        stream?.finish()
         try? toAgent.fileHandleForWriting.close()
-        if process.isRunning { process.terminate() }
+    }
+
+    /// Serializes repeated close calls so they never repeat or downgrade a
+    /// signal. Process identity is retained, checked immediately before each
+    /// signal, and never looked up by name or inherited from a tmux session.
+    private func requestStop(stage: Int) {
+        lifecycleLock.withLock {
+            guard started, process.isRunning, stage > stopStage else { return }
+            switch stage {
+            case 1:
+                process.interrupt()
+            case 2:
+                process.terminate()
+            default:
+                let pid = process.processIdentifier
+                guard pid > 0, Darwin.kill(pid, SIGKILL) == 0 else { return }
+            }
+            stopStage = stage
+        }
+    }
+
+    private func waitForExit(until deadline: TimeInterval) async -> Bool {
+        while !hasExited {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { return false }
+            do {
+                try await Task.sleep(nanoseconds: UInt64(min(remaining, 0.01) * 1_000_000_000))
+            } catch {
+                return hasExited
+            }
+        }
+        return true
     }
 }
