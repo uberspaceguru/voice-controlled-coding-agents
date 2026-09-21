@@ -118,6 +118,38 @@ Application Support data and is not daily dogfood.
 
 `tbase new [dir]` starts a fresh session in its own Terminal window.
 
+### Existing Ghostty and tmux sessions
+
+Keep your existing terminals and sessions. The read-only fleet inventory scans
+the default tmux socket directory, the app's socket directory, and the current
+`TMUX` endpoint. Add an unusual socket explicitly with `--socket /absolute/path`.
+
+```sh
+swift build --product tbase
+.build/debug/tbase fleet --json
+.build/debug/tbase organize --output-dir "$HOME/Documents/tmux-proposal-$(date +%Y%m%d-%H%M%S)"
+```
+
+The organizer starts one restricted, persisted Codex analysis using your existing
+CLI login. It sees a frozen inventory of session/window names, directories,
+process names and verified identities. It returns `organization.html` and
+`plan.json` in a new private directory. `--dry-run` prepares the input without
+calling a model. Each pane must appear exactly once in the validated proposal.
+No group is applied automatically. No existing pane is attached, renamed, moved,
+sent input, enrolled, resumed, or stopped. Terminal scrollback, process arguments,
+and environment values are excluded from the inventory.
+
+An identified agent, an unidentified pane, a shell, and an agent enrolled for voice
+replies remain separate facts. Manager fleet questions use this inventory;
+dispatch continues through the existing verified/enrolled target path. Discovery
+does not grant control over newly found panes or add them to the native grid.
+Ghostty stays your terminal; this increment does not change window focus behavior.
+
+Use separate Git worktrees when agents make independent changes to the same
+repository. A tmux session does not itself require a worktree, and observing an
+existing session does not require moving or restarting it. See
+[the inventory contract and integration notes](docs/existing-tmux-agents.md).
+
 ### Codex hook approval
 
 After wiring Codex hooks, open a Codex CLI session and enter `/hooks`.

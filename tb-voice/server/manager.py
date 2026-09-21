@@ -30,6 +30,7 @@ from dialogue_manager import CURRENT_TURN, DialogueManagerMixin, TurnGuard
 from events import emit
 from exact_speech import ExactSpeakFrame
 from exact_values import EXACT_INTENTS, recorded_value
+from fleet import FleetReadError, fleet_speech, parse_fleet
 from mute import EXTERNAL_UNTIL
 from spoken import spoken
 from tools import _json_or_text, _run
@@ -42,10 +43,6 @@ SOUNDS = os.getenv("TB_SOUNDS", "")
 TBASE = os.getenv("TBASE_BIN", "tbase")
 if not os.path.exists(TBASE) and TBASE != "tbase":
     logger.warning(f"TBASE_BIN {TBASE} does not exist; reads will fail closed")
-
-class FleetReadError(RuntimeError):
-    """No authoritative current fleet snapshot could be read."""
-
 
 INTENTS = {
     **EXACT_INTENTS,
@@ -579,35 +576,20 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         return labels
 
     async def _fleet_inventory(self, *, include_names=True):
+        snapshot = await self._tmux_fleet()
+        self._require_current()
         targets = await self._targets()
         self._require_current()
-        labels = self._fleet_labels(targets)
-        count = len(labels)
-        unique = {row["sessionId"]: row for row in targets}
-        busy = sum(row.get("status") == "busy" for row in unique.values())
-        idle = sum(row.get("status") == "idle" for row in unique.values())
-        waiting = sum(row.get("status") == "waiting" for row in unique.values())
-        unknown = count - busy - idle - waiting
-        enrolled = sum(row.get("enrolled") is True for row in unique.values())
-        prefix = f"I can see {count} live agent{'s' if count != 1 else ''}."
-        if labels:
-            prefix += f" Activity reports: {busy} busy, {idle} idle, {waiting} waiting, {unknown} unknown."
-            prefix += f" {enrolled} enrolled for voice replies."
-        if not include_names or not labels:
-            await self._say(prefix, response_mode="detail")
-            return
-        # Speak every returned name in bounded chunks so the ordinary sanitizer
-        # cannot silently truncate an inventory to only its first few agents.
-        chunk = prefix
-        for number, label in enumerate(labels, 1):
-            entry = f" {number}: {label}."
-            if len((chunk + entry).split()) > 70:
-                if await self._say(chunk, response_mode="detail") is not True:
-                    return
-                self._require_current()
-                chunk = ""
-            chunk += entry
-        await self._say(chunk.strip(), response_mode="detail")
+        for chunk in fleet_speech(snapshot, targets, include_names=include_names):
+            self._require_current()
+            if await self._say(chunk, response_mode="detail") is not True:
+                return
+
+    async def _tmux_fleet(self):
+        code, out = await _run(TBASE, "fleet", "--json")
+        if code != 0:
+            raise FleetReadError("Tmux fleet read unavailable")
+        return parse_fleet(_json_or_text(code, out).get("data"))
 
     async def _manager_question(self, text):
         targets = await self._targets()

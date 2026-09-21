@@ -11,6 +11,12 @@ func usage() -> Never {
 
       tbase status [--json]     counts by status, plus spool depth
       tbase targets [--json]    live sessions, with goal and waiting state under --json
+      tbase fleet --json [--socket /absolute/socket]
+                                observe existing terminal servers and verified agents
+      tbase organize --output-dir /absolute/new-directory [--dry-run]
+                     [--socket /absolute/socket] [--timeout-seconds 180]
+                     [--helper /absolute/organize-tmux.py] [--report-session UUID]
+                                ask a restricted organizer for a grouping proposal
       tbase brief <id> --json   a session's latest brief and its ladder (the manager's read)
       tbase drain               move spooled hook events into the queue
       tbase events [status]     list events (optionally filtered)
@@ -148,6 +154,14 @@ func report(_ outcome: DispatchOutcome) -> Never {
     case .failed(let failure):
         print("failed — \(failure)")
         exit(5)
+    }
+}
+
+if command == "fleet" || command == "organize" {
+    do { exit(try runFleetCommand(args)) }
+    catch {
+        FileHandle.standardError.write(Data("\(error)\n".utf8))
+        exit(2)
     }
 }
 

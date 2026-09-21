@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 from test_memory_manager import SpeechEvidence, make_manager
 
+from fleet import parse_fleet
 from manager import FleetReadError, Manager
 
 
@@ -41,6 +42,23 @@ def fixture(count=7, staged=False):
     m.stage = targets[0].copy() if staged and targets else None
     m.dialogue.sync(m.stage and m.stage["sessionId"], targets)
     m._targets = AsyncMock(return_value=targets)
+    async def read_snapshot():
+        return parse_fleet({
+            "schemaVersion": 1, "snapshotId": "fixture", "capturedAt": 1,
+            "servers": [{"socketPath": "/tmp/synthetic", "status": "ok"}],
+            "panes": [{
+                "id": f"pane-{index}", "socketPath": "/tmp/synthetic",
+                "sessionName": "fixture", "windowId": "@0", "windowName": "fixture",
+                "paneId": f"%{index}", "pid": index + 100, "tty": f"/dev/ttys{index}",
+                "cwd": target["cwd"], "command": "synthetic", "dead": False,
+                "attachedClientCount": 0, "identityStatus": "verified",
+                "candidateHarnesses": ["synthetic"], "agents": [{
+                    "sessionId": target["sessionId"], "harness": "synthetic",
+                    "pid": index + 100, "identityEvidence": ["synthetic registry"],
+                }],
+            } for index, target in enumerate(targets)],
+        })
+    m._tmux_fleet = AsyncMock(side_effect=read_snapshot)
     m._brain.plain.return_value = "I can answer manager-level questions from the current records."
     speech = SpeechEvidence(m)
     return m, speech, targets
