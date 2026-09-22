@@ -17,6 +17,11 @@ func usage() -> Never {
                      [--socket /absolute/socket] [--timeout-seconds 180]
                      [--helper /absolute/organize-tmux.py] [--report-session UUID]
                                 ask a restricted organizer for a grouping proposal
+      tbase terminal [automatic|ghostty|terminal]
+                                choose the terminal used by Go to Agent
+      tbase manager-backend [dialogue|codex]
+                                choose the existing or persistent reasoning manager
+      tbase focus <sessionId>   open a verified agent's terminal view without moving it
       tbase brief <id> --json   a session's latest brief and its ladder (the manager's read)
       tbase drain               move spooled hook events into the queue
       tbase events [status]     list events (optionally filtered)
@@ -413,6 +418,10 @@ do {
             exit(1)
         }
         let needle = args[1]
+        if ExistingAgentDirectory.shared.refresh().contains(where: { $0.sessionId.hasPrefix(needle) }) {
+            print("not revived: this agent is already running; use tbase focus with its full identifier")
+            exit(2)
+        }
         let found = SessionDiscovery.discover(ttl: 0).sessions
         // Harness, not "did the lookup find anything". `discover` used to
         // answer for Claude Code alone, so a hit here meant a Claude session
@@ -508,6 +517,48 @@ do {
         default:
             break
         }
+
+    case "terminal":
+        if args.count > 1 {
+            guard args.count == 2, let choice = TerminalHost.Choice(rawValue: args[1]) else {
+                print("usage: tbase terminal [automatic|ghostty|terminal]"); exit(2)
+            }
+            try TerminalHost.save(choice)
+        }
+        print(TerminalHost.preference.rawValue)
+
+    case "manager-backend":
+        if args.count > 1 {
+            guard args.count == 2, ["dialogue", "codex"].contains(args[1]) else {
+                print("usage: tbase manager-backend [dialogue|codex]"); exit(2)
+            }
+            let path = HubApp.configPath
+            var root: [String: Any] = [:]
+            if FileManager.default.fileExists(atPath: path.path) {
+                guard let object = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any] else {
+                    print("configuration is not a JSON object; left unchanged"); exit(2)
+                }
+                root = object
+            }
+            var manager = root["manager"] as? [String: Any] ?? [:]
+            manager["backend"] = args[1]
+            root["manager"] = manager
+            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]).write(to: path, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+            print("saved; takes effect on the next manager start")
+        }
+        print(ManagerConfig.backend())
+
+    case "focus":
+        guard args.count == 2 else { print("usage: tbase focus <full-session-id>"); exit(2) }
+        let id = args[1]
+        guard let record = ExistingAgentDirectory.shared.record(sessionId: id), let pane = record.pane else {
+            print("not focused: agent identity is absent or ambiguous"); exit(2)
+        }
+        let outcome = await TerminalTabFocus.focus(pane: pane, sessionId: id)
+        if case .focused = outcome { print("focused"); break }
+        print("not focused: \(outcome)"); exit(5)
 
     case "agent-command":
         // The settings pane does not own this yet (see the branch notes), so
@@ -994,6 +1045,14 @@ case "reconcile":
             break
         }
         let needle = args[1]
+        let records = ExistingAgentDirectory.shared.refresh()
+        let matches = records.filter { $0.sessionId == needle || $0.sessionId.hasPrefix(needle) }
+        if matches.count > 1 { print("ambiguous session identifier; nothing ended"); exit(4) }
+        if let match = matches.first,
+           FileSessionOwnershipStore.shared.current(sessionId: match.sessionId) == nil {
+            print("not ended: this agent belongs to an existing terminal session; open its terminal to end it")
+            exit(2)
+        }
         SessionTermination.trace = { print($0) }
         guard let live = (ClaudeAgentsCLI().sessions() ?? []).first(where: {
             $0.sessionId == needle || $0.sessionId.hasPrefix(needle) || $0.name == needle
@@ -1006,15 +1065,20 @@ case "reconcile":
             let matchedId = FileSessionOwnershipStore.shared.all()
                 .first(where: { $0.sessionId == needle || $0.sessionId.hasPrefix(needle) })?.sessionId
             guard let matchedId,
-                  let record = FileSessionOwnershipStore.shared.verifiedCurrent(sessionId: matchedId)
+                  let record = FileSessionOwnershipStore.shared.verifiedCurrent(sessionId: matchedId),
+                  !record.isExternal
             else {
                 print("no live session matching \(needle) — `tbase status` lists Claude Code, "
                     + "`tbase discover` lists Codex")
                 break
             }
             let label = String(record.sessionId.prefix(8))
+            guard case .here(let ownedPane, let ownedPid) = AgentLedger.locate(sessionId: record.sessionId),
+                  ownedPid == record.pid, !ownedPane.isExternal else {
+                print("not ended: the original process/pane could not be verified"); exit(2)
+            }
             switch SessionTermination.end(pid: record.pid, named: label,
-                                          expectedTty: ProcessProbe.tty(of: record.pid),
+                                          expectedTty: ownedPane.paneTty,
                                           // The record's own harness, by the
                                           // same rule the grid's right-click
                                           // uses, so the CLI and the panel
@@ -1040,9 +1104,18 @@ case "reconcile":
             }
             break
         }
+        guard let owned = FileSessionOwnershipStore.shared.current(sessionId: live.sessionId), !owned.isExternal else {
+            print("not ended: this agent belongs to an existing terminal session; open its terminal to end it")
+            exit(2)
+        }
+        guard owned.pid == live.pid,
+              case .here(let ownedPane, let ownedPid) = AgentLedger.locate(sessionId: live.sessionId),
+              ownedPid == owned.pid, !ownedPane.isExternal else {
+            print("not ended: the original process/pane could not be verified"); exit(2)
+        }
         let label = live.name ?? String(live.sessionId.prefix(8))
         switch SessionTermination.end(pid: live.pid, named: label,
-                                      expectedTty: ProcessProbe.tty(of: live.pid),
+                                      expectedTty: ownedPane.paneTty,
                                       expectedCommand: KnownHarnesses
                                           .adapter(for: live.harness).processCommandFragment) {
         case .alreadyGone:      print("\(label) was already gone")
@@ -1255,12 +1328,14 @@ case "reconcile":
 
     case "targets":
         let enrolment = EnrolmentRegistry()
-        guard let claudeLive = ClaudeAgentsCLI().sessions() else {
+        let records = ExistingAgentDirectory.shared.refresh()
+        let claudeLive = ClaudeAgentsCLI().sessions()
+        guard claudeLive != nil || !records.isEmpty else {
             print(args.contains("--json") ? "null" : "(liveness probe FAILED — the app is failing open right now)"); break
         }
         // Codex has no probe to fail — its half of this list is whatever
         // `ownership` currently verifies as alive, unconditionally.
-        let live = claudeLive + FileSessionOwnershipStore.shared.liveNonRegistrySessions()
+        let live = FleetLive.merging((claudeLive ?? []) + FileSessionOwnershipStore.shared.liveNonRegistrySessions(), records: records)
         if args.contains("--json") {
             print(ManagerJSON.encode(ManagerJSON.targets(
                 store: store, live: live,
@@ -1298,102 +1373,42 @@ case "reconcile":
         guard args.count > 2 else { usage() }
         let sessionId = args[1]
         let text = args.dropFirst(2).joined(separator: " ")
-
-        // The same per-target selection Coordinator makes: a duplicate
-        // sessionId (Claude Code tolerates two processes dual-live on one
-        // conversation) resolves to TB's own tmux-owned row when one exists,
-        // never an arbitrary one of the two — this CLI is a second real
-        // dispatch door onto the same targets, per CLAUDE.md rule 7.
-        guard let (live, resolvedPane) = (ClaudeAgentsCLI().sessions() ?? [])
-            .preferringTmuxOwned(sessionId: sessionId) else {
-            // Not a live Claude Code session — check the ownership record
-            // before refusing outright. A real branch, not a fallback
-            // guess: TB only ever comes to hold a Codex pid through a
-            // resume that already succeeded (`attemptCodexResume`), so a
-            // hit here is never inferred the way a hand-started session's
-            // liveness would be.
-            guard let record = FileSessionOwnershipStore.shared.verifiedCurrent(sessionId: sessionId),
-                  record.harness == CodexAdapter().id, let pane = record.pane else {
-                print("not dispatched: session is not registered in `claude agents --json`,")
-                print("  and TB holds no ownership record for it either (not attached, or the")
-                print("  attach exited since). Run  tbase revive \(sessionId)  first.")
+        let owned = FileSessionOwnershipStore.shared.current(sessionId: sessionId)
+        let record: SessionOwnershipRecord
+        let pane: TmuxPaneAddress
+        if let owned, !owned.isExternal {
+            guard case .here(let address, let pid) = AgentLedger.locate(sessionId: sessionId),
+                  pid == owned.pid, !address.isExternal else {
+                print("not dispatched: the recorded agent no longer matches its exact pane")
                 exit(2)
             }
-            guard EnrolmentRegistry().isEnrolled(sessionId: sessionId, cwd: record.cwd) else {
-                print("not dispatched: session is not enrolled. Run:  tbase enroll \(sessionId)")
+            guard EnrolmentRegistry().isEnrolled(sessionId: sessionId, cwd: owned.cwd) else {
+                print("not dispatched: session is not enrolled. Run: tbase enroll \(sessionId)")
                 exit(2)
             }
-            let target = DispatchTarget(
-                kind: .tmux, sessionId: sessionId, pid: record.pid, tty: record.paneTty,
-                pane: pane, transcriptPath: CodexRollout.rolloutPath(forSessionId: sessionId),
-                label: nil, readinessSource: .rolloutTail,
-                promptGlyph: CodexAdapter().capabilities.promptGlyph,
-                // Found live, 22 Aug: without this, Codex's own idle hint
-                // text reads as someone's unsent message and every
-                // dispatch is refused — floorHeld, permanently, on an
-                // otherwise-idle composer. See classifyPromptLine's doc
-                // comment.
-                idlePlaceholder: CodexAdapter().trustPrompt?.settledBannerNeedle,
-                // Same refusal the app's own dispatch makes (11 Sep): a pane
-                // on Codex's update chooser is never typed into.
-                blockingPrompts: CodexAdapter().trustPrompt?.neverAutoAcceptNeedles ?? [])
-            report(await TmuxTransport().send(text: text, to: target))
-            break
-        }
-        guard EnrolmentRegistry().isEnrolled(sessionId: sessionId, cwd: live.cwd) else {
-            print("not dispatched: session is not enrolled. Run:  tbase enroll \(sessionId)")
-            exit(2)
-        }
-        // FOUND, not derived (codebase audit, 21 Aug): a hand-rolled `/` → `-`
-        // encoding lived here and was wrong for exactly this repo's own
-        // worktrees — Claude Code also maps `.` → `-`, so a session running
-        // under `.claude/worktrees/…` (every session working this arc, per
-        // CLAUDE.md rule 5) resolved to a path that does not exist. The text
-        // still landed; delivery just could never confirm it, burning every
-        // retry and the extra one-Return attempt each time before timing out.
-        // See TranscriptArchive.transcriptPath's own doc for why this must
-        // never be reproduced by hand a second time.
-        let transcript = TranscriptArchive.transcriptPath(forSessionId: sessionId)
-
-        if live.isBackground {
-            print("not dispatched: this is a first-party background session")
-            print("  (claude --bg-pty-host) with no tab and no supported input channel.")
-            exit(2)
-        }
-        // Reused from selection above rather than re-resolved: two live
-        // lookups for the same pid, moments apart, can disagree if a pane
-        // closes in between (the 19 Aug misfire's shape).
-        var pane = resolvedPane
-            ?? TmuxOwnership.pane(forSessionId: live.sessionId, pid: live.pid)
-        var dispatchPid = live.pid
-        if pane == nil, let cwd = live.cwd {
-            // Same transfer the real app's `Coordinator.dispatch` makes —
-            // this CLI is a second real dispatch door onto the same
-            // targets (CLAUDE.md rule 7), not a lesser one, so a
-            // hand-started session gets the same ownership TRANSFER here,
-            // not a different refusal.
-            if let transferred = SessionLauncher.OwnershipTransfer.toTmux(
-                sessionId: sessionId,
-                // `live` came from `ClaudeAgentsCLI`, so this session is a
-                // Claude Code one by construction; Codex targets never reach
-                // this branch. Named rather than defaulted, because a default
-                // here is exactly what ended a session with the wrong binary.
-                launch: HarnessLaunch(harness: ClaudeCodeAdapter().id),
-                directory: cwd) {
-                pane = transferred.pane
-                dispatchPid = transferred.pid
+            record = owned
+            pane = address
+        } else {
+            // A direct request is permission to relay this message, never to
+            // enroll, restart, transfer, or take ownership of an existing agent.
+            guard let observed = ExistingAgentDirectory.shared.record(sessionId: sessionId),
+                  let address = observed.pane else {
+                print("not dispatched: existing agent identity is absent or ambiguous; nothing was moved")
+                exit(2)
             }
+            record = observed
+            pane = address
         }
-        guard let pane else {
-            print("not dispatched: tmux is unavailable for this session (no pane, and "
-                + "resuming one under tmux failed)")
-            exit(2)
-        }
-        let target = DispatchTarget(
-            kind: .tmux,
-            sessionId: sessionId, pid: dispatchPid, tty: ProcessProbe.tty(of: dispatchPid),
-            pane: pane, transcriptPath: transcript, label: live.name,
-            readinessSource: .claudeAgents)
+        let adapter = KnownHarnesses.adapter(for: record.harness)
+        let target = DispatchTarget(kind: .tmux, sessionId: sessionId, pid: record.pid,
+            tty: record.paneTty, pane: pane,
+            transcriptPath: record.harness == "codex" ? CodexRollout.rolloutPath(forSessionId: sessionId)
+                : TranscriptArchive.transcriptPath(forSessionId: sessionId),
+            readinessSource: record.harness == "codex" ? .rolloutTail : .claudeAgents,
+            promptGlyph: adapter.capabilities.promptGlyph,
+            idlePlaceholder: adapter.trustPrompt?.settledBannerNeedle,
+            pasteChip: adapter.capabilities.pasteChipPrefix,
+            blockingPrompts: adapter.trustPrompt?.neverAutoAcceptNeedles ?? [])
         report(await TmuxTransport().send(text: text, to: target))
 
     case "send-raw-tmux":

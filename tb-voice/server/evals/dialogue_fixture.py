@@ -148,6 +148,9 @@ def contract_errors(turn, observed):
         require(observed["op"] == expected["operation"], "operation")
     if "policy_route" in expected:
         require(observed.get("route") == expected["policy_route"], "policy_route")
+    if "focus_target" in expected:
+        require(observed["op"] == "focus", "focus_operation")
+        require(observed["target"] == expected["focus_target"], "focus_target")
     require(observed["dispatch_count"] == expected["dispatch_count"], "dispatch_count")
     if expected["dispatch_count"]:
         require(observed["dispatch_target"] == expected["dispatch_target"], "dispatch_target")

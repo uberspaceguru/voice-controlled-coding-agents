@@ -44,12 +44,15 @@ extension AppDelegate {
             // The probe below is synchronous, with no suspension until its
             // result returns to the main actor. Check this execution segment.
             let ranOffMain = { !Thread.isMainThread }()
-            let liveSessions = (ClaudeAgentsCLI().sessions() ?? [])
-                + FileSessionOwnershipStore.shared.liveNonRegistrySessions()
+            ExistingAgentDirectory.shared.refresh(force: false)
+            let liveSessions = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
             var names = cachedNames
             // Retain the verified name while the agent is alive, for the
             // later post-mortem. Ownership verification is unchanged.
             for session in liveSessions where names[session.sessionId] == nil {
+                guard let ownership = FileSessionOwnershipStore.shared.current(sessionId: session.sessionId),
+                      !ownership.isExternal, ownership.socketPath == nil,
+                      ownership.socketName == Tmux.socketName else { continue }
                 if let name = TmuxOwnership.pane(
                     forSessionId: session.sessionId, pid: session.pid)?.sessionName {
                     names[session.sessionId] = name
@@ -73,6 +76,11 @@ extension AppDelegate {
     private func recordObservedExits(_ live: [(id: String, harness: String, sessionName: String?)]) {
         for vanished in exitWatch.observe(live) {
             paneNameById[vanished.id] = nil
+            // Discovery never grants lifecycle ownership. An external session
+            // disappearing must not reap a same-named session on our server.
+            guard let record = FileSessionOwnershipStore.shared.current(sessionId: vanished.id),
+                  !record.isExternal, record.socketPath == nil,
+                  record.socketName == Tmux.socketName else { continue }
             guard let name = vanished.sessionName else { continue }
             let id = vanished.id
             let harness = vanished.harness
@@ -133,8 +141,7 @@ extension AppDelegate {
         // from the grid, or read blockedOnYou wrong, because Codex has no
         // registry of its own to appear in. `liveNonRegistrySessions` adds
         // ownership's own answer for a harness with no registry.
-        let found = (ClaudeAgentsCLI().sessions() ?? [])
-            + FileSessionOwnershipStore.shared.liveNonRegistrySessions(
+        let found = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [],
                 // NO STATUS FOR CODEX, since 01 Sep. This used to say "busy"
                 // whenever a prompt had gone in with no Stop after it, which
                 // was a compensation for one thing: `SessionActivity` could not

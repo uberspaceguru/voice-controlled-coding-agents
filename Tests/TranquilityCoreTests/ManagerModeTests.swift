@@ -50,4 +50,14 @@ final class ManagerModeTests: XCTestCase {
         XCTAssertTrue(env["PATH"]?.hasSuffix(":/x") ?? false)
         XCTAssertTrue(env["PATH"]?.contains("/.local/bin") ?? false)
     }
+
+    func testSupervisorBackendIsOptInAndDoesNotReplaceOtherConfiguration() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("manager-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        XCTAssertEqual(ManagerConfig.backend(config: tmp), "dialogue")
+        try Data(#"{"manager":{"backend":"codex","command":["/launcher"]}}"#.utf8).write(to: tmp)
+        XCTAssertEqual(ManagerConfig.backend(config: tmp), "codex")
+        XCTAssertEqual(ManagerConfig.command(config: tmp), ["/launcher"])
+        XCTAssertEqual(ManagerConfig.environment(base: ["TB_MANAGER_BACKEND": "dialogue"])["TB_MANAGER_BACKEND"], "dialogue")
+    }
 }

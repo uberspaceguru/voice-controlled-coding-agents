@@ -156,10 +156,9 @@ final class CoordinatorTests: XCTestCase {
         // and after `resumeTwin` runs, since that is exactly the seam it
         // exercises (the real `resumeTwin` ends one pid and starts another).
         agents overrideAgents: (any ClaudeAgentsReading)? = nil,
-        // Empty by default, and never the real FileSessionOwnershipStore —
-        // this file's tests must not read whatever this machine's own real
-        // Codex sessions happen to have recorded.
-        ownership: any SessionOwnershipStore = StubOwnershipStore(records: [])
+        // Ordinary dispatch fixtures represent app-owned processes. Tests of
+        // external discovery/refusal explicitly provide an empty/external store.
+        ownership: (any SessionOwnershipStore)? = nil
     ) throws -> Coordinator {
         let registry = EnrolmentRegistry(url: tmpDir.appendingPathComponent("enrolled.json"))
         if enrolled { try registry.enrol(sessionId: "sess-1") }
@@ -177,7 +176,11 @@ final class CoordinatorTests: XCTestCase {
                                 name: "p", waitingFor: nil)
                   }
                 : []),
-            ownership: ownership,
+            ownership: ownership ?? StubOwnershipStore(records:
+                ["sess-1", "old", "new", "human", "cron", "waiting-one"].map {
+                    SessionOwnershipRecord(sessionId: $0, harness: "claude-code",
+                        pid: Int(ProcessInfo.processInfo.processIdentifier), origin: .appLaunched)
+                }),
             recovery: RecoveryChain(
                 providers: [FixedTranscript(text: "yes go ahead")],
                 maxAttemptsPerProvider: 1, backoff: [0]),
@@ -971,8 +974,8 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertEqual(transport.sent.count, 1, "one attempt: a duplicate is worse than a drop")
     }
 
-    /// The 22 Aug fix, narrowed 23 Aug: a hand-started session with no tmux
-    /// pane resumes a twin (via the injected `resumeTwin`) and dispatches
+    /// An explicitly app-owned session with no pane can request recovery
+    /// through the injected `resumeTwin` and dispatches
     /// into THAT. Used to be "instead of falling to `transport`
     /// (AppleScript/Terminal.app)" — that fallback is deleted outright now
     /// (single-transport cut), so the only thing left to assert is that the
@@ -980,7 +983,7 @@ final class CoordinatorTests: XCTestCase {
     /// pid/pane are fabricated here — only the WIRING is under test, not
     /// `resumeTmux` itself, which has no place running for real inside a
     /// unit test (see `resumeTwin`'s own doc comment).
-    func testAHandStartedSessionWithNoPaneResumesATwinAndDispatchesOverTmux() async throws {
+    func testAnOwnedSessionWithNoPaneRequestsRecoveryAndDispatchesOverTmux() async throws {
         let tmux = RecordingTransport()
         let fabricatedPane = TmuxPaneAddress(
             socketName: "tb", paneId: "%99", sessionName: "tb-fabricated", paneTty: "/dev/ttys099")
@@ -1015,6 +1018,57 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertEqual(resumeTwinCalls.all.first?.sessionId, "sess-1")
         XCTAssertEqual(resumeTwinCalls.all.first?.directory, "/tmp/p")
         XCTAssertEqual(tmux.sent.count, 1, "the reply lands in the twin, over tmux")
+    }
+
+    private func assertMissingPaneDoesNotRecover(records: [SessionOwnershipRecord]) async throws {
+        final class Calls: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func record() { lock.lock(); value += 1; lock.unlock() }
+            var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        let calls = Calls()
+        let transport = RecordingTransport()
+        let coordinator = try makeCoordinator(tmuxTransport: transport,
+            resumeTwin: { _, _, _ in
+                calls.record()
+                return TmuxPaneAddress(socketName: "tb", paneId: "%99", sessionName: "must-not-recover",
+                                       paneTty: "/dev/ttys099")
+            }, ownership: StubOwnershipStore(records: records))
+        try append()
+        guard case .readyToSend(let utteranceId, _, _, _) =
+            try await coordinator.submitReply(pcm16: silence(), to: "sess-1") else {
+            return XCTFail("expected the explicit reply to await delivery")
+        }
+        guard case .dispatchFailed(.injectionFailed, _) =
+            try await coordinator.confirmAndSend(utteranceId: utteranceId) else {
+            return XCTFail("missing identity must refuse rather than replace a process")
+        }
+        XCTAssertEqual(calls.count, 0, "recovery must never be invoked without matching lifecycle ownership")
+        XCTAssertTrue(transport.sent.isEmpty)
+        XCTAssertEqual(try store.utterance(id: utteranceId)?.status, .ready,
+                       "a refused send keeps the user's words")
+    }
+
+    func testExternalIdentityMissNeverInvokesRecovery() async throws {
+        try await assertMissingPaneDoesNotRecover(records: [])
+    }
+
+    func testPersistedExternalObservationNeverInvokesRecovery() async throws {
+        try await assertMissingPaneDoesNotRecover(records: [SessionOwnershipRecord(
+            sessionId: "sess-1", harness: "claude-code",
+            pid: Int(ProcessInfo.processInfo.processIdentifier), origin: .external)])
+    }
+
+    func testStaleOwnedPidNeverInvokesRecovery() async throws {
+        try await assertMissingPaneDoesNotRecover(records: [SessionOwnershipRecord(
+            sessionId: "sess-1", harness: "claude-code", pid: -1, origin: .appLaunched)])
+    }
+
+    func testMismatchedOwnedHarnessNeverInvokesRecovery() async throws {
+        try await assertMissingPaneDoesNotRecover(records: [SessionOwnershipRecord(
+            sessionId: "sess-1", harness: "codex",
+            pid: Int(ProcessInfo.processInfo.processIdentifier), origin: .appLaunched)])
     }
 
     /// A mutable `ClaudeAgentsReading` fake — needed only by the test below,
@@ -1057,7 +1111,9 @@ final class CoordinatorTests: XCTestCase {
                 agents.replace(rows(222))
                 return fabricatedPane
             },
-            agents: agents)
+            agents: agents,
+            ownership: StubOwnershipStore(records: [SessionOwnershipRecord(
+                sessionId: "sess-1", harness: "claude-code", pid: 111, origin: .appLaunched)]))
         try append()
         _ = try await coordinator.announceNext()
 
@@ -1319,6 +1375,9 @@ final class CoordinatorTests: XCTestCase {
             speech: SpeechChain(preferred: SilentSpeech(), fallback: SilentSpeech()),
             gate: InterruptGate(minimumIdleSeconds: 0, signals: .quiescent),
             tmuxTransport: transport, enrolment: registry, agents: agents,
+            ownership: StubOwnershipStore(records: [SessionOwnershipRecord(
+                sessionId: "sess-1", harness: "claude-code",
+                pid: Int(ProcessInfo.processInfo.processIdentifier), origin: .appLaunched)]),
             recovery: RecoveryChain(
                 providers: [FixedTranscript(text: "yes go ahead")],
                 maxAttemptsPerProvider: 1, backoff: [0]),

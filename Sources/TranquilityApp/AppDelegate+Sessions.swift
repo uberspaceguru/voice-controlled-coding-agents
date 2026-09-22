@@ -130,8 +130,7 @@ extension AppDelegate {
                     break
                 }
                 guard !recorder.isRecording else { break }
-                let live = ((ClaudeAgentsCLI().sessions() ?? [])
-                    + FileSessionOwnershipStore.shared.liveNonRegistrySessions())
+                let live = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
                     .first(where: { $0.sessionId == session })
                 let name = tabDisplayName(for: target, live: live)
                 hud.adoptTarget(sessionId: session, pid: live?.pid,
@@ -1085,8 +1084,7 @@ extension AppDelegate {
         let sessionId = target.sessionId
         Task.detached(priority: .userInitiated) { [weak self] in
             let front = await Self.frontmostTerminalTabTty()
-            let pid = front == nil ? nil : ((ClaudeAgentsCLI().sessions() ?? [])
-                + FileSessionOwnershipStore.shared.liveNonRegistrySessions())
+            let pid = front == nil ? nil : FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
                 .first(where: { $0.sessionId == sessionId })?.pid
             let onScreen = pid.flatMap { ProcessProbe.tty(of: $0) }
             let skip = front != nil && onScreen == front
@@ -1373,8 +1371,7 @@ extension AppDelegate {
     /// receives only resolved strings and enters `newSession` once.
     func continueWork(from sourceSessionId: String, name sourceName: String) {
         Task.detached(priority: .userInitiated) { [weak self] in
-            let live = (ClaudeAgentsCLI().sessions() ?? [])
-                + FileSessionOwnershipStore.shared.liveNonRegistrySessions()
+            let live = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
             guard let source = live.first(where: { $0.sessionId == sourceSessionId }),
                   let directory = source.cwd else {
                 await MainActor.run {
@@ -1641,9 +1638,24 @@ extension AppDelegate {
             // `agents` alone made GO TO AGENT a permanent no-op for every
             // Codex session (26 Aug) — silently logged and returned, never
             // navigated, because Codex has no registry to appear in here.
-            guard let live = ((ClaudeAgentsCLI().sessions() ?? [])
-                + FileSessionOwnershipStore.shared.liveNonRegistrySessions())
-                .first(where: { $0.sessionId == sessionId }) else {
+            let ownership = FileSessionOwnershipStore.shared.current(sessionId: sessionId)
+            if ownership == nil || ownership?.isExternal == true {
+                guard let external = ExistingAgentDirectory.shared.record(sessionId: sessionId),
+                      let pane = external.pane else {
+                    await MainActor.run { [weak self] in
+                        self?.hud.finishGoToSession("I couldn't verify that existing agent. Nothing was restarted or moved.", about: sessionId)
+                    }
+                    return
+                }
+                let outcome = await TerminalTabFocus.focus(pane: pane, sessionId: sessionId)
+                await MainActor.run { [weak self] in
+                    if case .focused = outcome { self?.hud.finishGoToSession(nil, about: sessionId) }
+                    else { self?.hud.finishGoToSession("Couldn't open that terminal view. The agent is still running.", about: sessionId) }
+                }
+                return
+            }
+            guard let live = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
+                .first(where: { $0.sessionId == sessionId && $0.pid == ownership?.pid }) else {
                 let short = sessionId.prefix(8)
                 // The card's guard comes down HERE, before anything else is
                 // looked up. The 12 Aug contract is that the button never
@@ -1848,7 +1860,7 @@ extension AppDelegate {
                 case .failed(let message):
                     Permissions.log("goTo FAILED: \(message)")
                     report("failed", nil)
-                    self.hud.finishGoToSession("Couldn't control Terminal: \(message)", about: sessionId)
+                    self.hud.finishGoToSession("Couldn't open the terminal: \(message)", about: sessionId)
                 }
             }
         }
@@ -2308,8 +2320,7 @@ extension AppDelegate {
     @discardableResult
     func confirmRevivedPid(sessionId: String, tries: Int = 20) async -> Int? {
         for _ in 0..<tries {
-            if let pid = ((ClaudeAgentsCLI().sessions() ?? [])
-                + FileSessionOwnershipStore.shared.liveNonRegistrySessions())
+            if let pid = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
                 .first(where: { $0.sessionId == sessionId })?.pid {
                 await MainActor.run { [weak self] in
                     self?.hud.attachLivePid(pid, sessionId: sessionId)
@@ -2769,8 +2780,7 @@ extension AppDelegate {
             }
 
             guard let store = await self?.store else { return }
-            let pid = ((ClaudeAgentsCLI().sessions() ?? [])
-                + FileSessionOwnershipStore.shared.liveNonRegistrySessions())
+            let pid = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
                 .first(where: { $0.sessionId == sessionId })?.pid
             do {
                 // The durable half. The card is already on screen; this is what

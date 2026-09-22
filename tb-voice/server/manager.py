@@ -33,6 +33,7 @@ from exact_values import EXACT_INTENTS, recorded_value
 from fleet import FleetReadError, fleet_speech, parse_fleet
 from mute import EXTERNAL_UNTIL
 from spoken import spoken
+from supervisor_manager import SupervisorManagerMixin
 from tools import _json_or_text, _run
 
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
@@ -49,6 +50,8 @@ INTENTS = {
     "fleet_inventory": "Asks which coding agents or sessions are available, or requests their names/list. Read the whole fleet; no single agent selection is required.",
     "fleet_count": "Asks how many agent processes are live, running, busy, idle, or available. Count the authoritative fleet and distinguish process liveness from activity and enrollment; no single agent is required.",
     "manager_status": "Checks whether this manager is present, connected, receiving the user, or asks for a response to establish contact. A request for a reply, not a passive backchannel.",
+    "supervise": "Asks the manager to understand, organize, compare, or plan work across the fleet, keep track of agents, or restore the overall work context. This is a managerial assessment, not authorization to send tasks to unspecified agents.",
+    "focus_agent": "A present request to bring up, show, or switch to a particular live agent's terminal window or pane. This opens a view of existing work; it neither sends a work instruction nor starts an agent. Questions about how to use the controls belong to teach.",
     "invite_next": "Invite the next agent or session to speak; 'next agent'; 'who is up'; 'what's next' when no agent is on stage",
     "rung_goal": "Asks what this project or piece of work is, or what the goal is",
     "rung_findings": "Asks what the agent found or what happened",
@@ -335,12 +338,13 @@ class Brain:
         return (r.json()["choices"][0]["message"].get("content") or "").strip()
 
 
-class Manager(DialogueManagerMixin, FrameProcessor):
+class Manager(SupervisorManagerMixin, DialogueManagerMixin, FrameProcessor):
     def __init__(self, jev: JevClient):
         super().__init__()
         self._jev = jev
         self._brain = Brain()
         self._init_dialogue()
+        self._init_supervisor()
         seed_exchange()
         self._recent: list[str] = []
         self.stage: dict | None = None
@@ -364,10 +368,12 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self._close_dialogue(frame, direction)
+            await self._stop_supervisor()
             return  # The lifecycle frame was forwarded before delivery draining.
         if isinstance(frame, StartFrame):
             # The pipeline is running and the mic is open: now it is listening.
             await emit(None, "ready")
+            self._start_supervisor_watch()
         if isinstance(frame, BotStoppedSpeakingFrame):
             # Generic stop has no context ID: orb state only, never delivery proof.
             await emit(None, "quiet")  # the manager's voice stopped; the orb goes back to rest

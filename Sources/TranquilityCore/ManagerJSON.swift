@@ -52,6 +52,8 @@ public enum ManagerJSON {
         public var sessionId: String
         public var project: String
         public var eventId: Int64
+        /// The recorded turn's time, not the time this JSON was requested.
+        public var recordedAtMs: Int64
         public var recap: String?
         public var proposal: String?
         public var goal: String?
@@ -117,6 +119,7 @@ public enum ManagerJSON {
             .map { Rung(kind: $0.kind.rawValue.lowercased(), spoken: $0.spoken.text) }
         return Brief(
             sessionId: sessionId, project: stop.projectLabel, eventId: stop.latestId,
+            recordedAtMs: stop.createdAtMs,
             recap: brief.recap, proposal: brief.proposal, goal: brief.goal,
             findings: brief.findings, solution: brief.solution, why: brief.rationale,
             rungs: rungs,

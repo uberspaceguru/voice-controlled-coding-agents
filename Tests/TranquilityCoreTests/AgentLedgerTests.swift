@@ -98,15 +98,14 @@ final class AgentLedgerTests: XCTestCase {
         XCTAssertEqual(d.adopt?.harness, "claude-code")
     }
 
-    /// A record names a session our server no longer has, and the registry
-    /// has no pane either: whatever is alive is a bare process.
-    func testARecordWhosePaneIsGoneFallsToTheProcessFacts() {
+    /// A stale attachment is never permission to terminate and resume its PID.
+    func testARecordWhosePaneIsGoneRefusesOwnershipTransfer() {
         let record = SessionOwnershipRecord(
             sessionId: "a77cbb1d-2468", harness: "claude-code", pid: 5555,
             paneId: "%9", socketName: "tb", sessionName: "tb-deadbeef", paneTty: "/dev/ttys099")
         let f = facts(record: record, registry: registry("a77cbb1d-2468", pid: 5555, tmux: nil),
                       alive: [5555], ttys: [5555: "/dev/ttys099"])
-        XCTAssertEqual(decide(f), .unhosted(pid: 5555))
+        guard case .unknown = decide(f) else { return XCTFail(decide(f).summary) }
     }
 
     // MARK: adoption

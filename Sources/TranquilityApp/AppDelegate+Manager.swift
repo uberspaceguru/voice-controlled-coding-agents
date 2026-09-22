@@ -53,8 +53,7 @@ extension AppDelegate {
             _ = await previous?.value
             guard !Task.isCancelled else { return }
             let event = try? store?.latestStop(for: session)
-            let live = ((ClaudeAgentsCLI().sessions() ?? [])
-                + FileSessionOwnershipStore.shared.liveNonRegistrySessions())
+            let live = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
                 .first { $0.sessionId == session }
             hud.showAnnouncement(
                 spoken: spoken,

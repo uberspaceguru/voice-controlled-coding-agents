@@ -182,6 +182,10 @@ public enum SessionTermination {
     ) -> Outcome {
         let label = "\(name) (pid \(pid))"
 
+        if ledger.all().contains(where: { $0.pid == pid && $0.isExternal }) {
+            return .refused("this is an externally managed agent; discovery did not grant lifecycle ownership")
+        }
+
         if !mayEndForeignProcesses(), !ledger.all().contains(where: { $0.pid == pid }) {
             let why = "this is a test build and pid \(pid) is not in its own ledger; a test "
                 + "build ends only agents it launched"

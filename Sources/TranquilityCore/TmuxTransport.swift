@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // MARK: - tmux subprocess runner
 
@@ -91,15 +92,21 @@ public enum Tmux {
     public static func run(
         _ arguments: [String],
         socket: String? = nil,
+        socketPath: String? = nil,
         stdin: Data? = nil,
         timeout: TimeInterval = 5
     ) -> Result<String, ScriptError> {
+        guard let endpoint = socketArguments(socket: socket, socketPath: socketPath) else {
+            return .failure(ScriptError(message: "invalid exact tmux socket path"))
+        }
         guard let binary = resolveBinary() else {
             return .failure(ScriptError(message: "tmux binary not found"))
         }
         var env = ProcessInfo.processInfo.environment
-        var argv = arguments
-        if let socket {
+        let argv = endpoint + arguments
+        if socketPath != nil {
+            env.removeValue(forKey: "TMUX_TMPDIR")
+        } else if let socket {
             // Only the app's OWN server relocates out of /tmp (the periodic
             // cleanup trap). Any other named socket — a drill's throwaway
             // server — lives wherever tmux puts sockets by default, so the
@@ -109,7 +116,6 @@ public enum Tmux {
                     at: socketDirectory, withIntermediateDirectories: true)
                 env["TMUX_TMPDIR"] = socketDirectory.path
             }
-            argv = ["-L", socket] + arguments
         } else {
             env.removeValue(forKey: "TMUX_TMPDIR")
         }
@@ -150,6 +156,15 @@ public enum Tmux {
                               timeout: timeout)
     }
 
+    /// Exact-path callers can never fall back to an identically named server.
+    static func socketArguments(socket: String?, socketPath: String?) -> [String]? {
+        if let socketPath {
+            guard let path = TmuxFleet.canonicalSocket(socketPath) else { return nil }
+            return ["-S", path]
+        }
+        return socket.map { ["-L", $0] } ?? []
+    }
+
 }
 
 // MARK: - Ownership
@@ -164,13 +179,19 @@ public enum Tmux {
 public struct TmuxPaneAddress: Sendable, Equatable {
     /// nil = the user's default server; `Tmux.socketName` = our dedicated one.
     public var socketName: String?
+    public var socketPath: String?
+    /// Observation and control address only; never lifecycle ownership.
+    public var isExternal: Bool
     /// The pane id ("%12") — the address every tmux call uses.
     public var paneId: String
     public var sessionName: String
     public var paneTty: String
 
-    public init(socketName: String?, paneId: String, sessionName: String, paneTty: String) {
+    public init(socketName: String?, paneId: String, sessionName: String, paneTty: String,
+                socketPath: String? = nil, isExternal: Bool = false) {
         self.socketName = socketName
+        self.socketPath = socketPath
+        self.isExternal = isExternal
         self.paneId = paneId
         self.sessionName = sessionName
         self.paneTty = paneTty
@@ -183,7 +204,16 @@ public struct TmuxPaneAddress: Sendable, Equatable {
     /// the launcher and names the object we actually created, so a delayed
     /// callback either reaches that session or reaches nothing — never the
     /// next agent that happened to inherit its tty.
-    public var stableTarget: String { sessionName }
+    public var stableTarget: String { isExternal ? paneId : sessionName }
+
+    /// Lock/cache identity includes the endpoint, never just a server-local %id.
+    /// Legacy namespaces stay distinct from exact paths until re-resolved.
+    public var routingKey: String {
+        let endpoint = socketPath.map { "path:" + $0 }
+            ?? "legacy:" + (socketName ?? "default") + ":" + Tmux.socketDirectory.path
+        return SHA256.hash(data: Data((endpoint + "\0" + paneId).utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 public enum TmuxOwnership {
@@ -485,10 +515,7 @@ extension Array where Element == LiveSession {
 /// to: it is a lamp overlay describing what the panel is doing, not a mutex
 /// over a terminal.
 ///
-/// Bounded, and it fails OPEN. A stuck holder must not silently stop delivery
-/// forever; after the ceiling this proceeds unlocked and says so, which is a
-/// risk of interleaving in a case that was 100% interleaved before this
-/// existed.
+/// Bounded and fail-closed: a missed lock never permits overlapping input.
 enum PaneDispatchLock {
 
     /// Long enough for a real dispatch (a confirmed one is ~1s, a failing one
@@ -496,24 +523,25 @@ enum PaneDispatchLock {
     /// costs one delivery's latency rather than the delivery.
     static let ceiling: TimeInterval = 45
 
-    /// Returns the held descriptor, or nil when it gave up waiting.
-    static func acquire(paneId: String, trace: ((String) -> Void)? = nil) -> Int32? {
-        let dir = Tmux.socketDirectory.deletingLastPathComponent()
+    /// A miss is a refusal, never permission to interleave terminal input.
+    static func acquire(pane: TmuxPaneAddress, timeout: TimeInterval = ceiling,
+                        directory: URL? = nil, trace: ((String) -> Void)? = nil) -> Int32? {
+        let dir = directory ?? Tmux.socketDirectory.deletingLastPathComponent()
             .appendingPathComponent("locks", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Pane ids are "%12"; the percent is not a filename problem but the
-        // sanitising is free and the intent is clearer than trusting it.
-        let name = paneId.replacingOccurrences(of: "%", with: "pane-")
+        // Both endpoint and pane identity are hashed; arbitrary names never
+        // become filesystem paths, and %1 on another server is independent.
+        let name = pane.routingKey
         let fd = open(dir.appendingPathComponent("\(name).lock").path,
                       O_CREAT | O_RDWR, 0o600)
         guard fd >= 0 else { return nil }
-        let deadline = Date().addingTimeInterval(ceiling)
-        while Date() < deadline {
+        let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
+        repeat {
             if flock(fd, LOCK_EX | LOCK_NB) == 0 { return fd }
+            if ProcessInfo.processInfo.systemUptime >= deadline { break }
             Thread.sleep(forTimeInterval: 0.05)
-        }
-        trace?("dispatch: pane \(paneId) lock not acquired in \(Int(ceiling))s — "
-            + "proceeding unlocked rather than dropping the message")
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        trace?("dispatch: pane \(pane.paneId) lock unavailable — refusing overlapping input")
         close(fd)
         return nil
     }
@@ -538,20 +566,26 @@ public struct TmuxTransport: DispatchTransport {
     public var verificationTimeout: TimeInterval
     public var pollInterval: TimeInterval
     private let agents: ClaudeAgentsReading
+    private let externalVerifier: @Sendable (String, Int, TmuxPaneAddress) -> Bool
 
     public init(
         verificationTimeout: TimeInterval = 10,
         pollInterval: TimeInterval = 0.1,
-        agents: ClaudeAgentsReading = ClaudeAgentsCLI()
+        agents: ClaudeAgentsReading = ClaudeAgentsCLI(),
+        externalVerifier: @escaping @Sendable (String, Int, TmuxPaneAddress) -> Bool = {
+            ExistingAgentDirectory.shared.verifies(sessionId: $0, pid: $1, pane: $2)
+        }
     ) {
         self.verificationTimeout = verificationTimeout
         self.pollInterval = pollInterval
         self.agents = agents
+        self.externalVerifier = externalVerifier
     }
 
     public func readiness(for target: DispatchTarget) async -> Readiness {
         guard let pid = target.pid, ProcessProbe.isAlive(pid) else { return .targetGone }
         guard let pane = target.pane, paneExists(pane) else { return .targetGone }
+        guard identityStillMatches(target, pane: pane) else { return .targetGone }
 
         switch target.readinessSource {
         case .provider:
@@ -627,7 +661,7 @@ public struct TmuxTransport: DispatchTransport {
     /// opposite of it. Anything else reports failure with the words left
     /// exactly where they are, which is a state a person can see and act on.
     public func send(text: String, to target: DispatchTarget) async -> DispatchOutcome {
-        guard let pane = target.pane else {
+        guard let suppliedPane = target.pane, let pane = exactAddress(suppliedPane) else {
             return .failed(.injectionFailed("tmux target has no pane address"))
         }
         // Local on purpose: the dialog re-check needs this pid, and today it
@@ -661,8 +695,17 @@ public struct TmuxTransport: DispatchTransport {
         // Serialised per pane from here to the end, across processes. Taken
         // AFTER the cheap refusals so a malformed send never queues behind a
         // real one.
-        let lock = PaneDispatchLock.acquire(paneId: pane.paneId, trace: Self.trace)
+        guard let lock = PaneDispatchLock.acquire(pane: pane, trace: Self.trace) else {
+            return .failed(.injectionFailed("another sender holds this pane; message was not pasted"))
+        }
         defer { PaneDispatchLock.release(lock) }
+        let bufferName = Self.dispatchBufferName()
+        var bufferLoaded = false
+        defer {
+            if bufferLoaded {
+                Tmux.run(["delete-buffer", "-b", bufferName], socket: pane.socketName, socketPath: pane.socketPath)
+            }
+        }
 
         let start = Date()
         // Everything appended before this instant is history, and history is
@@ -699,6 +742,7 @@ public struct TmuxTransport: DispatchTransport {
             }
 
             guard paneExists(pane) else { return .failed(.targetGone) }
+            guard identityStillMatches(target, pane: pane) else { return .failed(.targetGone) }
             // Text sent into copy-mode is destroyed outright — not queued, not
             // shown. Cleared and VERIFIED cleared before anything is typed.
             if !clearMode(pane) {
@@ -717,10 +761,14 @@ public struct TmuxTransport: DispatchTransport {
             // is first-hand evidence the TUI took the message — evidence that
             // does not depend on a file being written in time.
             var echoSeen = false
-            let floor = Self.decide(line: promptLine(
+            let inputLine = promptLine(
                 pane, payload: payload, glyph: target.promptGlyph,
                 placeholder: target.idlePlaceholder, chip: target.pasteChip,
-                ourChips: []))
+                ourChips: [])
+            guard Self.mayUseComposer(line: inputLine, external: pane.isExternal) else {
+                return .deferred(.floorHeld)
+            }
+            let floor = Self.decide(line: inputLine)
 
             var joining = false
             // One line per attempt, said out loud. There was no record of
@@ -751,7 +799,7 @@ public struct TmuxTransport: DispatchTransport {
                     let before = Self.collapsed(rows.joined(separator: " "))
                     if !before.isEmpty { expectedInBox = before + " " + payload }
                 }
-                Tmux.run(["send-keys", "-t", pane.paneId, "C-e"], socket: pane.socketName)
+                Tmux.run(["send-keys", "-t", pane.paneId, "C-e"], socket: pane.socketName, socketPath: pane.socketPath)
                 joining = true
             case .paste:
                 break
@@ -763,14 +811,17 @@ public struct TmuxTransport: DispatchTransport {
                 // quotes and dollar signs intact). The ONLY paste in this
                 // function, and `pasted` is what says so afterwards.
                 guard case .success = Tmux.run(
-                    ["load-buffer", "-b", "tb-dispatch", "-"],
-                    socket: pane.socketName,
+                    ["load-buffer", "-b", bufferName, "-"],
+                    socket: pane.socketName, socketPath: pane.socketPath,
                     stdin: Data((joining ? "\n" + payload : payload).utf8))
                 else { continue }
+                bufferLoaded = true
+                guard identityStillMatches(target, pane: pane) else { return .failed(.targetGone) }
                 guard case .success = Tmux.run(
-                    ["paste-buffer", "-b", "tb-dispatch", "-d", "-p", "-t", pane.paneId],
-                    socket: pane.socketName)
+                    ["paste-buffer", "-b", bufferName, "-d", "-p", "-t", pane.paneId],
+                    socket: pane.socketName, socketPath: pane.socketPath)
                 else { continue }
+                bufferLoaded = false
                 pasted = true
 
                 // Advisory, never a gate. A TUI takes a moment to draw a
@@ -799,6 +850,7 @@ public struct TmuxTransport: DispatchTransport {
             // a Return at a modal ANSWERS it (gate finding V4) and a session
             // can raise one between two of these.
             for round in 0..<3 {
+                guard identityStillMatches(target, pane: pane) else { return .failed(.targetGone) }
                 if dialogIsUp(target: target, pid: pid) { break }
                 // Copy-mode before EVERY Return, not just once at the top of
                 // the send. Return is a copy-mode key — in copy-mode it moves
@@ -814,8 +866,8 @@ public struct TmuxTransport: DispatchTransport {
                 // late and under someone else's send. Clearing here is the
                 // difference between an Enter that submits and one that
                 // scrolls.
-                _ = clearMode(pane)
-                Tmux.run(["send-keys", "-t", pane.paneId, "Enter"], socket: pane.socketName)
+                if !clearMode(pane), pane.isExternal { return .deferred(.floorHeld) }
+                Tmux.run(["send-keys", "-t", pane.paneId, "Enter"], socket: pane.socketName, socketPath: pane.socketPath)
                 let window: TimeInterval = round == 2 ? verificationTimeout : 4
                 if await landedInTranscript(payload, target: target, timeout: window,
                                             fromByteOffset: watermark) {
@@ -906,7 +958,7 @@ public struct TmuxTransport: DispatchTransport {
         // Clearing is safe here and everywhere else this file does it: leaving
         // a pane in copy-mode is itself the condition that destroys injected
         // text, which is why step 2 of every send clears it too.
-        _ = clearMode(pane)
+        if !clearMode(pane), pane.isExternal { return false }
         guard let text = screen(pane),
               let rows = Self.boxRows(screen: text, glyph: target.promptGlyph)
         else { return false }
@@ -918,24 +970,55 @@ public struct TmuxTransport: DispatchTransport {
 
     // MARK: observations (each one a postcondition something above polls)
 
+    static func dispatchBufferName() -> String { "tb-dispatch-" + UUID().uuidString }
+
+    private func identityStillMatches(_ target: DispatchTarget, pane: TmuxPaneAddress) -> Bool {
+        guard let pid = target.pid else { return false }
+        if pane.isExternal { return externalVerifier(target.sessionId, pid, pane) }
+        return ProcessProbe.isAlive(pid) && ProcessProbe.tty(of: pid) == pane.paneTty
+    }
+
+    private func exactAddress(_ pane: TmuxPaneAddress) -> TmuxPaneAddress? {
+        if let path = pane.socketPath {
+            guard TmuxFleet.canonicalSocket(path) == path else { return nil }
+            return pane
+        }
+        guard !pane.isExternal, case .success(let path) = Tmux.run(
+            ["display-message", "-p", "-t", pane.paneId, "#{socket_path}"],
+            socket: pane.socketName, socketPath: pane.socketPath, timeout: 3),
+              let exact = TmuxFleet.canonicalSocket(path.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        var resolved = pane
+        resolved.socketPath = exact
+        return resolved
+    }
+
     private func paneExists(_ pane: TmuxPaneAddress) -> Bool {
-        if case .success = Tmux.run(["list-panes", "-t", pane.paneId, "-F", "ok"],
-                                    socket: pane.socketName, timeout: 3) { return true }
+        if case .success(let out) = Tmux.run(
+            ["display-message", "-p", "-t", pane.paneId, "#{pane_id}\t#{pane_tty}\t#{pane_dead}"],
+            socket: pane.socketName, socketPath: pane.socketPath, timeout: 3) {
+            return out.trimmingCharacters(in: .whitespacesAndNewlines) == "\(pane.paneId)\t\(pane.paneTty)\t0"
+        }
         return false
     }
 
     private func inMode(_ pane: TmuxPaneAddress) -> Bool {
         guard case .success(let out) = Tmux.run(
             ["display-message", "-p", "-t", pane.paneId, "#{pane_in_mode}"],
-            socket: pane.socketName, timeout: 3) else { return false }
+            socket: pane.socketName, socketPath: pane.socketPath, timeout: 3) else { return false }
         return out == "1"
     }
 
     private func clearMode(_ pane: TmuxPaneAddress) -> Bool {
+        if pane.isExternal {
+            guard case .success(let out) = Tmux.run(
+                ["display-message", "-p", "-t", pane.paneId, "#{pane_in_mode}"],
+                socket: pane.socketName, socketPath: pane.socketPath, timeout: 3) else { return false }
+            return out.trimmingCharacters(in: .whitespacesAndNewlines) == "0"
+        }
         for _ in 0..<10 {
             guard inMode(pane) else { return true }
             Tmux.run(["send-keys", "-t", pane.paneId, "-X", "cancel"],
-                     socket: pane.socketName, timeout: 3)
+                     socket: pane.socketName, socketPath: pane.socketPath, timeout: 3)
             if poll(deadline: 0.5, every: 0.05, until: { !inMode(pane) }) { return true }
         }
         return !inMode(pane)
@@ -946,19 +1029,20 @@ public struct TmuxTransport: DispatchTransport {
     /// unreadable box gets the same handful of attempts and no more.
     static func clearBox(pane: TmuxPaneAddress, glyph: String,
                          screen: () -> String?) {
+        guard !pane.isExternal else { return }
         for _ in 0..<12 {
             let rows = boxRows(screen: screen() ?? "", glyph: glyph) ?? []
             let text = collapsed(rows.joined(separator: " "))
             if text.isEmpty { return }
-            Tmux.run(["send-keys", "-t", pane.paneId, "C-a"], socket: pane.socketName)
-            Tmux.run(["send-keys", "-t", pane.paneId, "C-k"], socket: pane.socketName)
+            Tmux.run(["send-keys", "-t", pane.paneId, "C-a"], socket: pane.socketName, socketPath: pane.socketPath)
+            Tmux.run(["send-keys", "-t", pane.paneId, "C-k"], socket: pane.socketName, socketPath: pane.socketPath)
         }
     }
 
     private func screen(_ pane: TmuxPaneAddress) -> String? {
         guard case .success(let out) = Tmux.run(
             ["capture-pane", "-p", "-J", "-t", pane.paneId],
-            socket: pane.socketName, timeout: 3) else { return nil }
+            socket: pane.socketName, socketPath: pane.socketPath, timeout: 3) else { return nil }
         return out
     }
 
@@ -1072,6 +1156,12 @@ public struct TmuxTransport: DispatchTransport {
         case empty
         case holds(ours: Bool)
         case unreadable
+    }
+
+    /// External workers share their composer with their existing human/client.
+    /// Unknown text, matching text, and unreadable screens all preserve it.
+    static func mayUseComposer(line: PromptLine, external: Bool) -> Bool {
+        !external || line == .empty
     }
 
     /// What a send does with the input line, decided once, before anything

@@ -20,8 +20,8 @@ import Foundation
 /// back to another server, another tty, or another pane. What it cannot
 /// verify it says it cannot verify, in words a caller can act on.
 public enum AgentLocation: Sendable, Equatable {
-    /// Verified: this pane, on a server this instance owns, hosts this pid,
-    /// and the pid is alive on that pane's tty. Safe to type into.
+    /// Verified control address. pane.isExternal keeps lifecycle ownership
+    /// separate: locating an existing worker never grants permission to end it.
     case here(TmuxPaneAddress, pid: Int)
     /// Alive, and hosted by something this instance cannot reach: the
     /// harness's own registry names a tmux session that is on none of our
@@ -71,14 +71,16 @@ public enum AgentLedger {
     /// One row of a live server's `list-panes -a`, on one socket.
     public struct PaneRow: Sendable, Equatable {
         public var socketName: String?
+        public var socketPath: String?
         public var sessionName: String
         public var paneId: String
         public var paneTty: String
         public var dead: Bool
 
         public init(socketName: String?, sessionName: String, paneId: String,
-                    paneTty: String, dead: Bool = false) {
+                    paneTty: String, dead: Bool = false, socketPath: String? = nil) {
             self.socketName = socketName
+            self.socketPath = socketPath
             self.sessionName = sessionName
             self.paneId = paneId
             self.paneTty = paneTty
@@ -87,7 +89,7 @@ public enum AgentLedger {
 
         public var address: TmuxPaneAddress {
             TmuxPaneAddress(socketName: socketName, paneId: paneId,
-                            sessionName: sessionName, paneTty: paneTty)
+                            sessionName: sessionName, paneTty: paneTty, socketPath: socketPath)
         }
     }
 
@@ -107,17 +109,20 @@ public enum AgentLedger {
         public var inventories: [(socket: String?, inventory: Inventory)]
         public var isAlive: @Sendable (Int) -> Bool
         public var ttyOf: @Sendable (Int) -> String?
+        public var exactInventories: [String: Inventory]
 
         public init(record: SessionOwnershipRecord?, registry: SessionRegistry.Entry?,
                     pidHint: Int?, inventories: [(socket: String?, inventory: Inventory)],
                     isAlive: @escaping @Sendable (Int) -> Bool,
-                    ttyOf: @escaping @Sendable (Int) -> String?) {
+                    ttyOf: @escaping @Sendable (Int) -> String?,
+                    exactInventories: [String: Inventory] = [:]) {
             self.record = record
             self.registry = registry
             self.pidHint = pidHint
             self.inventories = inventories
             self.isAlive = isAlive
             self.ttyOf = ttyOf
+            self.exactInventories = exactInventories
         }
     }
 
@@ -135,17 +140,39 @@ public enum AgentLedger {
     /// Where the session is, verified now. Adopts what it verifies.
     public static func locate(sessionId: String, pid pidHint: Int? = nil,
                               harness: String? = nil,
-                              store: any SessionOwnershipStore = FileSessionOwnershipStore.shared)
+                              store: any SessionOwnershipStore = FileSessionOwnershipStore.shared,
+                              existing: ExistingAgentDirectory = .shared)
     -> AgentLocation {
+        let stored = store.current(sessionId: sessionId)
+        // Imported observations must be freshly reverified, never converted
+        // into app ownership or used to fall back to another socket/process.
+        if stored == nil || stored?.isExternal == true {
+            if let record = existing.record(sessionId: sessionId), let pane = record.pane {
+                if let stored, (stored.harness != record.harness || stored.pid != record.pid || stored.socketPath != record.socketPath
+                    || stored.paneId != record.paneId || stored.paneTty != record.paneTty) {
+                    return .unknown("external attachment changed; select its current identity again")
+                }
+                return .here(pane, pid: record.pid)
+            }
+            if stored?.isExternal == true {
+                return .unknown("external attachment cannot be verified on its exact socket")
+            }
+            // A missing/ambiguous fleet result must not fall through to the
+            // narrower two-server legacy resolver and become owned by accident.
+            // In particular, duplicate conversations are deliberately omitted
+            // from the directory's actionable records.
+            return .unknown("no unique verified fleet attachment; no process was moved or adopted")
+        }
         let facts = Facts(
-            record: store.current(sessionId: sessionId),
+            record: stored,
             registry: SessionRegistry.entry(forSessionId: sessionId),
             pidHint: pidHint,
             inventories: TmuxOwnership.sockets.map { socket in
                 (socket, Self.inventory(socket: socket))
             },
             isAlive: { ProcessProbe.isAlive($0) },
-            ttyOf: { ProcessProbe.tty(of: $0) })
+            ttyOf: { ProcessProbe.tty(of: $0) },
+            exactInventories: stored?.socketPath.map { [$0: Self.inventory(socket: nil, socketPath: $0)] } ?? [:])
         let decision = decide(sessionId: sessionId, harness: harness, facts: facts)
         if let adopt = decision.adopt {
             store.record(adopt)
@@ -157,16 +184,16 @@ public enum AgentLedger {
     }
 
     /// One server's panes, with the fields a verification needs.
-    public static func inventory(socket: String?) -> Inventory {
+    public static func inventory(socket: String?, socketPath: String? = nil) -> Inventory {
         let listing = Tmux.run(
             ["list-panes", "-a", "-F", "#{session_name}\t#{pane_id}\t#{pane_tty}\t#{pane_dead}"],
-            socket: socket, timeout: 3)
+            socket: socket, socketPath: socketPath, timeout: 3)
         switch listing {
         case .success(let out):
             guard TmuxOwnership.inventoryIsIntelligible(out) else {
                 return .unaskable("listing could not be parsed")
             }
-            return .listed(parse(inventory: out, socket: socket))
+            return .listed(parse(inventory: out, socket: socket, socketPath: socketPath))
         case .failure(let error):
             if TmuxOwnership.serverIsAbsent(error.message)
                 || TmuxOwnership.serverHoldsNoPanes(error.message) {
@@ -176,13 +203,13 @@ public enum AgentLedger {
         }
     }
 
-    static func parse(inventory: String, socket: String?) -> [PaneRow] {
+    static func parse(inventory: String, socket: String?, socketPath: String? = nil) -> [PaneRow] {
         inventory.split(separator: "\n").compactMap { line in
             let parts = line.split(separator: "\t", maxSplits: 3,
                                    omittingEmptySubsequences: false).map(String.init)
             guard parts.count >= 3, !parts[0].isEmpty, parts[1].hasPrefix("%") else { return nil }
             return PaneRow(socketName: socket, sessionName: parts[0], paneId: parts[1],
-                           paneTty: parts[2], dead: parts.count > 3 && parts[3] == "1")
+                           paneTty: parts[2], dead: parts.count > 3 && parts[3] == "1", socketPath: socketPath)
         }
     }
 
@@ -198,6 +225,9 @@ public enum AgentLedger {
     /// `.elsewhere`; a server that could not answer is `.unknown`; and only a
     /// live pid that no claim places in any tmux is `.unhosted`.
     public static func decide(sessionId: String, harness: String?, facts: Facts) -> Decision {
+        if facts.record?.isExternal == true {
+            return Decision(location: .unknown("external attachment requires fresh fleet identity verification"), adopt: nil)
+        }
         let harnessId = harness ?? facts.record?.harness ?? ClaudeCodeAdapter().id
         var candidatePids: [Int] = []
         for pid in [facts.record?.pid, facts.registry?.pid, facts.pidHint] {
@@ -205,8 +235,9 @@ public enum AgentLedger {
         }
         let livePids = candidatePids.filter(facts.isAlive)
 
-        func rows(on socket: String?) -> Inventory? {
-            facts.inventories.first { $0.socket == socket }?.inventory
+        func rows(on socket: String?, path: String? = nil) -> Inventory? {
+            if let path { return facts.exactInventories[path] }
+            return facts.inventories.first { $0.socket == socket }?.inventory
         }
         func anyUnaskable() -> String? {
             for entry in facts.inventories {
@@ -223,33 +254,39 @@ public enum AgentLedger {
         func adoption(_ row: PaneRow, pid: Int) -> SessionOwnershipRecord? {
             let current = facts.record
             if let current, current.pid == pid, current.paneId == row.paneId,
-               current.sessionName == row.sessionName, current.socketName == row.socketName {
+               current.sessionName == row.sessionName, current.socketName == row.socketName,
+               current.socketPath == row.socketPath {
                 return nil
             }
             return SessionOwnershipRecord(
                 sessionId: sessionId, harness: harnessId, pid: pid,
                 paneId: row.paneId, socketName: row.socketName,
                 sessionName: row.sessionName, paneTty: row.paneTty,
-                cwd: current?.cwd ?? facts.registry?.cwd)
+                cwd: current?.cwd ?? facts.registry?.cwd, socketPath: row.socketPath,
+                origin: current?.origin)
         }
 
         // 1. Our own record: the pane we made, on the server we made it on.
         if let record = facts.record, let sessionName = record.sessionName, let paneId = record.paneId {
-            switch rows(on: record.socketName) {
+            switch rows(on: record.socketName, path: record.socketPath) {
             case .unaskable(let why):
                 return Decision(location: .unknown("\(record.socketName ?? "default") server "
                     + "holds \(sessionName) and could not be asked: \(why)"), adopt: nil)
             case .listed(let rows):
                 if let row = rows.first(where: { $0.sessionName == sessionName && $0.paneId == paneId }),
+                   record.paneTty == nil || record.paneTty == row.paneTty,
                    !row.dead, let pid = occupant(of: row) {
                     return Decision(location: .here(row.address, pid: pid),
                                     adopt: adoption(row, pid: pid))
                 }
                 // Our pane is gone from its server, or nobody we know is on
-                // it any more. The record is history, not an address; fall
-                // through to what the harness itself says.
+                // it any more. Never turn a failed attachment into permission
+                // to terminate and resume a supposedly unhosted process.
+                return Decision(location: livePids.isEmpty ? .gone
+                    : .unknown("recorded pane no longer verifies; refusing ownership transfer"), adopt: nil)
             case nil:
-                break
+                return Decision(location: livePids.isEmpty ? .gone
+                    : .elsewhere("recorded socket is not available to this instance"), adopt: nil)
             }
         }
 

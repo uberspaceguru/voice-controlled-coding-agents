@@ -1,0 +1,400 @@
+{
+  "schema_version": 1,
+  "purpose": "Small synthetic development routing check for existing-terminal focus and supervisor integration. Not held out, a benchmark, or audio evidence. No real transcripts.",
+  "scope": {
+    "synthetic_text_only": true,
+    "per_turn_seeded_context": true,
+    "native_dispatch": false,
+    "audio_measured": false
+  },
+  "fixtures": {
+    "targets": [
+      {
+        "sessionId": "alpha",
+        "name": "Alpha",
+        "goal": "Review the API checks",
+        "cwd": "/synthetic/demo/api"
+      },
+      {
+        "sessionId": "beta",
+        "name": "Beta",
+        "goal": "Review the browser checks",
+        "cwd": "/synthetic/demo/browser"
+      }
+    ],
+    "clock": {
+      "now": 1000
+    }
+  },
+  "conversations": [
+    {
+      "id": "focus_supervisor_development",
+      "split": "development",
+      "turns": [
+        {
+          "id": "supervise.compare",
+          "text": "Tranquility, compare Alpha and Beta's recorded progress and identify which needs attention.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "route": "supervise",
+            "response": "summary",
+            "target": "none",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "answer",
+            "dispatch_count": 0,
+            "disposition": "answer",
+            "policy_route": "supervise"
+          }
+        },
+        {
+          "id": "fleet.count",
+          "text": "Tranquility, how many agent processes are currently live?",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "route": "fleet_count",
+            "response": "summary",
+            "target": "none",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "answer",
+            "dispatch_count": 0,
+            "disposition": "answer",
+            "policy_route": "fleet_count"
+          }
+        },
+        {
+          "id": "fleet.list",
+          "text": "Tranquility, list the names of all live agents.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "route": "fleet_inventory",
+            "response": "summary",
+            "target": "none",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "answer",
+            "dispatch_count": 0,
+            "disposition": "answer",
+            "policy_route": "fleet_inventory"
+          }
+        },
+        {
+          "id": "exact.directory",
+          "text": "Tranquility, give me Alpha's full directory path.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "route": "exact_directory",
+            "response": "exact_directory",
+            "target": "alpha",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "answer",
+            "dispatch_count": 0,
+            "disposition": "answer",
+            "policy_route": "exact_directory"
+          }
+        },
+        {
+          "id": "exact.sent_command",
+          "text": "Tranquility, what command did you send to Beta? Read it exactly.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": {
+              "text": "python -m pytest tests/test_browser.py -q",
+              "target": "beta",
+              "status": "sent",
+              "age_seconds": 4
+            },
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "route": "exact_command",
+            "response": "exact_command",
+            "target": "beta",
+            "source": "last_action",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "answer",
+            "dispatch_count": 0,
+            "disposition": "answer",
+            "policy_route": "exact_command"
+          }
+        },
+        {
+          "id": "direct.send",
+          "text": "Tranquility, tell Beta to inspect the browser checks and report missing edge cases.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "direct",
+            "route": "send_message",
+            "response": "receipt",
+            "target": "beta",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": true,
+            "operation": "dispatch",
+            "dispatch_count": 1,
+            "disposition": "sent",
+            "dispatch_target": "beta",
+            "dispatch_text": "Tranquility, tell Beta to inspect the browser checks and report missing edge cases."
+          }
+        },
+        {
+          "id": "focus.named",
+          "text": "Tranquility, bring up Beta's existing terminal window.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "route": "focus_agent",
+            "response": "receipt",
+            "target": "beta",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "focus",
+            "dispatch_count": 0,
+            "disposition": "focus",
+            "policy_route": "focus_agent",
+            "focus_target": "beta"
+          }
+        },
+        {
+          "id": "focus.ambiguous",
+          "text": "Tranquility, open that agent's terminal.",
+          "context": {
+            "stage": null,
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "inform",
+            "route": "focus_agent",
+            "response": "clarification",
+            "target": "ambiguous",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "clarify",
+            "dispatch_count": 0,
+            "disposition": "clarify"
+          }
+        },
+        {
+          "id": "quoted.navigation",
+          "text": "The guide says, \"Tranquility, open Beta's terminal,\" but I am only reading the guide aloud.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "think",
+            "route": "none",
+            "response": "silent",
+            "target": "none",
+            "source": "unknown",
+            "addressed": false,
+            "execution_now": false,
+            "operation": "silent",
+            "dispatch_count": 0,
+            "disposition": "silent"
+          }
+        },
+        {
+          "id": "ack.passive",
+          "text": "mm-hmm",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "text": "Alpha has two recorded checks.",
+              "act": "inform",
+              "response": "summary",
+              "target": "alpha"
+            }
+          },
+          "expect": {
+            "act": "ack",
+            "route": "none",
+            "response": "silent",
+            "target": "none",
+            "source": "unknown",
+            "addressed": false,
+            "execution_now": false,
+            "operation": "silent",
+            "dispatch_count": 0,
+            "disposition": "silent"
+          }
+        },
+        {
+          "id": "control.stop",
+          "text": "Tranquility, stop speaking now.",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "expect": {
+            "act": "control",
+            "route": "stop_speaking",
+            "response": "silent",
+            "target": "none",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "mute",
+            "dispatch_count": 0,
+            "disposition": "stop_speaking"
+          }
+        },
+        {
+          "id": "supervise.resume",
+          "text": "Tranquility, where were we in this conversation before the break?",
+          "context": {
+            "stage": "alpha",
+            "listening": "active",
+            "pending": null,
+            "last_action": null,
+            "last_command": null,
+            "proposal": null,
+            "candidates": [
+              "alpha",
+              "beta"
+            ],
+            "previous_turn": {
+              "text": "We were comparing the remaining browser checks.",
+              "act": "inform",
+              "response": "summary",
+              "target": "alpha"
+            }
+          },
+          "expect": {
+            "act": "inform",
+            "route": "conversation_resume",
+            "response": "detail",
+            "target": "none",
+            "source": "utterance",
+            "addressed": true,
+            "execution_now": false,
+            "operation": "answer",
+            "dispatch_count": 0,
+            "disposition": "answer",
+            "policy_route": "conversation_resume"
+          }
+        }
+      ]
+    }
+  ]
+}

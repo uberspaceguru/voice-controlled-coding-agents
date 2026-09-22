@@ -196,6 +196,41 @@ class Dialogue:
     def _receipt(self, text: str, reason: str) -> Decision:
         return Decision("say", reason, "receipt", text, epoch=self.epoch)
 
+    def _unique_sent_read_target(self, answers: dict) -> str | None:
+        """Ground a strict readback when manager scope and source scope split.
+
+        A self-contained query and its sole confirmed sent record can describe
+        the same read. This never grants execution, chooses among competing
+        records, or overrides any probability assigned to a different target.
+        """
+        record = self.last_action
+        if (chosen(answers, "act") != "inform"
+                or probability(answers, "act", "inform") < ACTION_THRESHOLD
+                or chosen(answers, "route") != "exact_command"
+                or probability(answers, "route", "exact_command") < ACTION_THRESHOLD
+                or chosen(answers, "response") != "exact_command"
+                or probability(answers, "response", "exact_command") < ACTION_THRESHOLD
+                or probability(answers, "execute") > 0.10
+                or chosen(answers, "source") != "last_action"
+                or probability(answers, "source", "last_action") < READ_THRESHOLD
+                or (probability(answers, "source", "last_action")
+                    + probability(answers, "source", "utterance")) < TARGET_THRESHOLD
+                or not record or record.status != "sent" or not record.text.strip()
+                or record.target not in self.targets
+                or not 0 <= self.clock() - record.created <= REFERENCE_TTL
+                or self.pending or self.proposal or self.last_command):
+            return None
+        compatible = {"none", "previous", record.target}
+        if self.stage == record.target:
+            compatible.add("stage")
+        if chosen(answers, "target") not in compatible:
+            return None
+        distribution = (answers.get("target") or {}).get("probabilities") or {}
+        if any(probability(answers, "target", key) > 0 for key in distribution if key not in compatible):
+            return None
+        mass = sum(probability(answers, "target", key) for key in compatible)
+        return record.target if mass >= TARGET_THRESHOLD else None
+
     def decide(self, text: str, answers: dict, epoch: int) -> Decision:
         decision = self._decide(text, answers, epoch)
         if decision.op == "clarify":
@@ -264,12 +299,21 @@ class Dialogue:
         if self.listening == "paused" and route not in {"resume_listening", "stop_speaking", "cancel"} and act != "cancel":
             return Decision("silent", "listening_paused", epoch=epoch)
 
+        if route == "focus_agent" and act in {"inform", "direct", "control"}:
+            if (addressed >= ACTION_ADDRESSED_THRESHOLD
+                    and probability(answers, "route", route) >= ACTION_THRESHOLD
+                    and self._target(answers) is not None):
+                return Decision("focus", "show_existing_terminal", "receipt", text,
+                                self._target(answers), route, epoch=epoch)
+            return Decision("clarify", "terminal_target_required", "clarification",
+                            "Which agent's terminal should I open?", epoch=epoch)
+
         if (act in {"inform", "control"} and route == "conversation_resume"
                 and probability(answers, "route", route) >= 0.75):
             return Decision("answer", "conversation_resume", "detail", text, target or self.stage,
                             route, epoch=epoch)
 
-        if act in {"direct", "inform", "control"} and route in {"invite_next", "teach", "speak", "summarize_recent", "fleet_inventory", "fleet_count", "manager_status"}:
+        if act in {"direct", "inform", "control"} and route in {"invite_next", "teach", "speak", "summarize_recent", "fleet_inventory", "fleet_count", "manager_status", "supervise"}:
             if probability(answers, "route", route) >= 0.75:
                 self.pending = None
                 return Decision("answer", "manager_information", response, text, target, route, epoch=epoch)
@@ -415,6 +459,9 @@ class Dialogue:
             # Resolving a named target alone can complete a target clarification.
             if self.pending and self.pending.status == "target" and source == "pending" and target:
                 return self.prepare(self.pending.text, target, self.pending.kind)
+            # Read-only source grounding must inspect competing pending data
+            # before the ordinary informational transition clears it.
+            target = target or self._unique_sent_read_target(answers)
             self.pending = None
             if (source in {"last_command", "last_action"}
                     and probability(answers, "source", source) >= TARGET_THRESHOLD

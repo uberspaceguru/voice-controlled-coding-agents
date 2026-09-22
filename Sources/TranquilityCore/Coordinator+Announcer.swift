@@ -166,8 +166,7 @@ extension Coordinator {
         // own recorded pid — the only other liveness fact this app has for
         // a harness with no registry — factored out once (26 Aug) after the
         // same gap turned up at roughly thirty call sites, not just this one.
-        let live = Set(sessions.map(\.sessionId))
-            .union(ownership.liveNonRegistrySessions().map(\.sessionId))
+        let live = Set(FleetLive.sessions(registry: sessions, ownership: ownership).map(\.sessionId))
         let all = yours(try store.waitingSessions())
         // A REMOTE AGENT IS LIVE BY ITS PROVIDER'S WORD, not by a pid on this
         // Mac. The two probes above are local facts and a remote agent has
@@ -414,13 +413,13 @@ extension Coordinator {
         // along too (26 Aug) — cosmetic on its own (a name capitalized wrong
         // in speech, not a functional break), fixed anyway since a full audit
         // means closing the small instances too, not just the loud ones.
-        let liveSessions: [LiveSession]? = agents.sessions().map { $0 + ownership.liveNonRegistrySessions() }
+        let liveSessions = FleetLive.sessions(registry: agents.sessions() ?? [], ownership: ownership)
 
         // A7: the rolling lexicon joins the per-message allowlist, so a name
         // recent sessions established survives speech even when this one
         // message did not capitalize it.
         let lexicon = Lexicon.harvest(
-            store: store, liveSessionNames: liveSessions?.compactMap(\.name) ?? [])
+            store: store, liveSessionNames: liveSessions.compactMap(\.name))
 
         // A REMOTE TURN NEEDS ITS OPENING TOO. With no first user message the
         // model was asked to recap an answer to a question it could not see,

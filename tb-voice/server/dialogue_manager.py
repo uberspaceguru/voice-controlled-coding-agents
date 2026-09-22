@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+import uuid
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
         self._input_ready = asyncio.Event()
         self._input_ready.set()
         self._deliveries = set()
+        self._run_id = uuid.uuid4().hex
 
     def _current(self):
         guard = CURRENT_TURN.get()
@@ -168,11 +170,26 @@ class DialogueManagerMixin(MemoryManagerMixin):
         self._require_current()
         if decision.op == "silent":
             return
+        if decision.op == "focus":
+            from manager import TBASE
+            from tools import _run
+            await self._input_ready.wait()
+            self._require_current()
+            code, _ = await _run(TBASE, "focus", decision.target, timeout=20)
+            self._require_current()
+            await self._say("Terminal opened." if code == 0 else "I couldn't open that terminal. The agent was not restarted.",
+                            response_mode="receipt")
+            return
         if decision.op == "mute":
             # Delegate audio interruption to the existing framework/native paths.
             await self.broadcast_interruption()
             await self._do_mute("", frame, direction)
         elif decision.op in {"say", "clarify"}:
+            status = ("clarify" if decision.op == "clarify" else
+                      "held" if decision.reason == "held" else
+                      "canceled" if decision.reason == "pending_canceled" else None)
+            await self._supervisor_event("decision", request_id=f"{self._run_id}:{decision.epoch}",
+                                         target=decision.target, text=decision.text, status=status)
             if (self.dialogue.stage and (decision.reason == "nothing_to_cancel"
                     or decision.reason == "cannot_undo" and self.dialogue.last_information)):
                 canceled = self.memory.cancel_question(self.dialogue.stage, f"dialogue:{decision.epoch}:cancel")
@@ -217,6 +234,13 @@ class DialogueManagerMixin(MemoryManagerMixin):
         # receipt, but cannot claim the subprocess never ran or replay it.
         async def deliver():
             try:
+                await self._supervisor_event("dispatch", request_id=f"{self._run_id}:{action.id}",
+                                             target=action.target, text=action.text, status="dispatching")
+            except Exception:
+                action.status = "not_sent"
+                await emit(None, "supervisor", reason="journal_unavailable", action=action.id)
+                return action.status
+            try:
                 if decision.route == "start_agent":
                     code, out = await _run(TBASE, "new", action.text, "--wait-live", timeout=60)
                     action.status = "sent" if code == 0 and "registered:" in out else "unknown"
@@ -228,6 +252,12 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 code, action.status = -1, "unknown"
             await emit(None, "dialogue", reason="delivery_result", action=action.id,
                        target=action.target, status=action.status, exit=code)
+            try:
+                await self._supervisor_event("dispatch", request_id=f"{self._run_id}:{action.id}",
+                                             target=action.target, text=action.text, status=action.status)
+            except Exception:
+                await emit(None, "supervisor", reason="receipt_persistence_failed", action=action.id,
+                           status=action.status)
             return action.status
         task = asyncio.create_task(deliver())
         self._deliveries.add(task)
@@ -256,6 +286,14 @@ class DialogueManagerMixin(MemoryManagerMixin):
             return
         if route == "manager_status":
             await self._say("Yes. I received your message.", response_mode="receipt")
+            return
+        if (getattr(self, "_supervisor", None) is not None and not decision.recorded_text
+                and not decision.response.startswith("exact_")
+                and route in {"manager_question", "supervise", "summarize_recent", "conversation_resume", "custom", "rung_why"}):
+            await self._supervisor_answer(decision)
+            return
+        if route == "supervise":
+            await self._manager_question(decision.text)
             return
         if route == "manager_question":
             await self._manager_question(decision.text)

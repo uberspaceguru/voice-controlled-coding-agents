@@ -79,9 +79,21 @@ public enum ManagerConfig {
     public static func environment(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
         var env = base
         env["TB_HOST"] = "app"
+        if env["TB_MANAGER_BACKEND"] == nil {
+            env["TB_MANAGER_BACKEND"] = backend()
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let extra = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
         env["PATH"] = (extra + (env["PATH"] ?? "").split(separator: ":").map(String.init)).joined(separator: ":")
         return env
+    }
+
+    /// Opt in to the persistent supervisor without replacing audio providers.
+    public static func backend(config: URL = HubApp.configPath) -> String {
+        guard let data = try? Data(contentsOf: config),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let manager = root["manager"] as? [String: Any],
+              manager["backend"] as? String == "codex" else { return "dialogue" }
+        return "codex"
     }
 }

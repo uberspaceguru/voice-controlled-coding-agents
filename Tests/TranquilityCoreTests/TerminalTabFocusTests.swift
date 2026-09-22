@@ -111,15 +111,14 @@ final class TerminalTabFocusTests: XCTestCase {
         XCTAssertNil(TerminalTabFocus.windowId(fromAttach: "ok"))
     }
 
-    func testAttachDetachesTheOldClientRatherThanMirroringOntoIt() throws {
-        // 23 Aug: GO TO AGENT clicked twice opened two Terminal windows onto
-        // the same pane. That was handled by searching Terminal for the
-        // existing client's tty; `-d` is tmux's own verb for it and needs no
-        // search at all, so the old window closes itself.
+    func testLegacyTerminalScriptPreservesExistingClientsAndSizes() throws {
+        // Even the historical pure script builder must not detach or resize.
         let script = try XCTUnwrap(TerminalTabFocus.attachScript(
             binary: "/opt/homebrew/bin/tmux", socket: "tb",
             tmuxTmpDir: "/x", sessionName: "tb-e8c484b1"))
-        XCTAssertTrue(script.contains("attach -d -t"))
+        XCTAssertTrue(script.contains("attach-session -E -f ignore-size,active-pane -t"))
+        XCTAssertFalse(script.contains("attach -d"))
+        XCTAssertFalse(script.contains("resize-window"))
     }
 
     func testTheWindowRegistryRemembersForgetsAndIsPerSession() {
@@ -147,7 +146,9 @@ final class TerminalTabFocusTests: XCTestCase {
         XCTAssertTrue(script.contains("TMUX_TMPDIR"))
         XCTAssertTrue(script.contains("-L "))
         XCTAssertTrue(script.contains("\"tb-e8c484b1\""))
-        XCTAssertTrue(script.contains("attach -d -t"))
+        XCTAssertTrue(script.contains("attach-session -E -f ignore-size,active-pane -t"))
+        XCTAssertFalse(script.contains("attach -d"))
+        XCTAssertFalse(script.contains("resize-window"))
         XCTAssertTrue(script.contains("do script"))
     }
 

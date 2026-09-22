@@ -403,10 +403,11 @@ extension Coordinator {
     /// ownership record already carries a verified pid and, since 26 Aug,
     /// its pane — nothing here shells out or waits.
     private func codexResolved(_ sessionId: String) -> (session: LiveSession, pane: TmuxPaneAddress?)? {
-        guard let record = ownership.verifiedCurrent(sessionId: sessionId),
+        guard let record = ownership.verifiedCurrent(sessionId: sessionId)
+                ?? ExistingAgentDirectory.shared.record(sessionId: sessionId),
               record.harness == CodexAdapter().id else { return nil }
-        let session = LiveSession(pid: record.pid, sessionId: sessionId, cwd: record.cwd,
-                                  status: "idle", name: nil, waitingFor: nil)
+        let session = LiveSession(harness: record.harness, pid: record.pid, sessionId: sessionId, cwd: record.cwd,
+                                  status: nil, name: nil, waitingFor: nil)
         return (session, record.pane)
     }
 
@@ -521,46 +522,33 @@ extension Coordinator {
         // chosen BECAUSE it was tmux-owned dispatching a beat later as
         // `.terminalApp` is the 19 Aug misfire's shape exactly. The common
         // single-row path never paid that lookup, so it resolves fresh here.
-        var pane = resolvedPane
+        let lifecycleOwner = ownership.current(sessionId: target.sessionId)
+        var pane = lifecycleOwner.flatMap { $0.isExternal ? nil : $0.pane } ?? resolvedPane
             ?? TmuxOwnership.pane(forSessionId: live.sessionId, pid: live.pid)
+        if let lifecycleOwner, !lifecycleOwner.isExternal,
+           lifecycleOwner.pid != live.pid || lifecycleOwner.harness != live.harness {
+            pane = nil
+        } else if lifecycleOwner == nil || lifecycleOwner?.isExternal == true {
+            // A duplicate registry row may have supplied a legacy tty-derived
+            // pane. Only fresh session identity can address an external agent;
+            // discovery never grants permission to replace its process.
+            let location = AgentLedger.locate(sessionId: live.sessionId, pid: live.pid,
+                                              harness: live.harness, store: ownership)
+            if case .here(let verified, let pid) = location, pid == live.pid, verified.isExternal {
+                pane = verified
+            } else {
+                pane = nil
+            }
+        }
 
-        // No tmux-owned row for this sessionId at all: a hand-started session
-        // TB has never touched, on its FIRST dispatch. Resume it under tmux
-        // now (via the injected `resumeTwin`, never a bare static call — see
-        // its own doc comment for why) rather than falling to AppleScript,
-        // which types straight into whatever the user may be looking at in
-        // their own terminal — the exact splice `TmuxTransport`'s floor check
-        // exists to prevent, and `TerminalAppTransport` cannot check for at
-        // all (22 Aug, 2026-08-22-tb-terminal-architecture: the AppleScript
-        // fallback here was never a real design choice, just unfinished
-        // wiring next to a mechanism — `resumeTmux` — that already does this
-        // exact job and was already live for Codex).
-        //
-        // The ORIGINAL process IS signalled now — reversed 23 Aug, the same
-        // day as the line above it was true: this used to leave the
-        // hand-started process running dual-live beside the tmux twin, on
-        // the premise that Claude Code's own Remote Control would keep the
-        // two in sync. It does not, in practice — nothing was watching the
-        // hand-started terminal any more once dispatch started answering the
-        // twin instead, so every reply after the first routed somewhere the
-        // human had no way to see (found live, sessionId f37aaddd, this very
-        // session). `resumeTwin`'s default implementation now ends the
-        // hand-started process and confirms it is gone before resuming under
-        // tmux, so there is exactly one live process per session afterward.
-        // The bar is still that dispatch WORKS — lands, gets answered, and
-        // TB reads the state back — it just no longer accepts "somewhere a
-        // human can't see" as satisfying that bar. Every dispatch after this
-        // one finds the twin already live in `agents --json` and
-        // `preferringTmuxOwned` picks it deterministically, so this only
-        // ever runs once per session.
-        // Codex-only: `codexResolved` already carries the ownership record's
-        // pane, so this branch is not reached for Codex in the normal case —
-        // but a record with no pane saved must still refuse rather than run
-        // `resumeTwin`, which is Claude Code's hand-started-process-adoption
-        // concept and has no Codex meaning (Codex sessions are always
-        // tmux-launched from the start; see `TmuxTransport.swift`'s own
-        // audit note on this, 26 Aug).
-        if pane == nil, !isCodex, let cwd = live.cwd {
+        // Recovery can replace a process, so it requires this app's retained
+        // lifecycle ownership of this exact live PID and harness. An unowned
+        // or ambiguous existing worker must stay where it is, even when its
+        // pane could not be found. The launcher independently verifies the
+        // endpoint before any destructive step.
+        if pane == nil, !isCodex, let cwd = live.cwd,
+           let lifecycleOwner, !lifecycleOwner.isExternal,
+           lifecycleOwner.pid == live.pid, lifecycleOwner.harness == live.harness {
             pane = resumeTwin(target.sessionId, cwd,
                               isCodex ? CodexAdapter().id : ClaudeCodeAdapter().id)
             if pane != nil {
@@ -607,7 +595,7 @@ extension Coordinator {
             // puts "elsewhere: in tmux session tb-68cf6fcf" on the failure
             // instead of a sentence that blames tmux.
             let location = AgentLedger.locate(sessionId: target.sessionId, pid: live.pid,
-                                              harness: live.harness)
+                                              harness: live.harness, store: ownership)
             return .dispatchFailed(
                 .injectionFailed("no pane this app can type into: \(location.summary)"),
                 utteranceId: utterance.id)

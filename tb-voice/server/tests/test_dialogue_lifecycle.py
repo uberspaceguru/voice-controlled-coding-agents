@@ -146,6 +146,29 @@ class StageLifecycle(unittest.IsolatedAsyncioTestCase):
         m._app_speaks.assert_not_awaited()
         self.assertEqual(m.dialogue.recent[-1]["act"], "correct")
 
+    async def test_shutdown_forwards_audio_teardown_before_supervisor_child_exit(self):
+        for frame in (CancelFrame(), EndFrame()):
+            m = manager()
+            forwarded, release = asyncio.Event(), asyncio.Event()
+            async def push(actual, direction):
+                self.assertIs(actual, frame)
+                forwarded.set()
+            async def stop():
+                self.assertTrue(forwarded.is_set())
+                await release.wait()
+            m.push_frame.side_effect = push
+            m._stop_supervisor = AsyncMock(side_effect=stop)
+            with patch.object(FrameProcessor, "process_frame", AsyncMock()):
+                closing = asyncio.create_task(m.process_frame(frame, FrameDirection.DOWNSTREAM))
+                try:
+                    await asyncio.wait_for(forwarded.wait(), 1)
+                    self.assertFalse(closing.done())
+                finally:
+                    release.set()
+                    await closing
+            m.push_frame.assert_awaited_once_with(frame, FrameDirection.DOWNSTREAM)
+            m._stop_supervisor.assert_awaited_once()
+
     async def test_backchannel_preserves_and_releases_the_original_invite(self):
         m, result = await self.run_stage_race("ack")
         self.assertIsNone(result)

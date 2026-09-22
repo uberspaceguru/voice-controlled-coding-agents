@@ -500,10 +500,9 @@ struct Permissions {
         }
     }
 
-    /// Whether this app may drive Terminal, asked without asking the user.
+    /// Whether this app may drive the selected terminal, without prompting.
     ///
-    /// Terminal is the target because it is the one this app automates — GO TO
-    /// AGENT opens a window there. `procNotFound`, when Terminal is not
+    /// The preference determines the automation target. `procNotFound`, when it is not
     /// running, is genuinely "cannot tell" and reads as not-yet-granted rather
     /// than denied: an app that has never been able to check must not accuse
     /// the user of refusing something.
@@ -511,6 +510,7 @@ struct Permissions {
     private static var automationCheckedAt: Date = .distantPast
     private static var automationProbeRunning = false
     private static var automationProbeGeneration = 0
+    private static var automationHost: String?
 
     /// ALWAYS RETURNS THE SEED ON ITS FIRST CALL IN A PROCESS, and callers
     /// that report rather than react need to know it. The refresh below runs
@@ -530,11 +530,19 @@ struct Permissions {
     /// passes `--selftest-hud` on every deploy. A sharper reading belongs in a
     /// later event of its own, not in a late copy of an early one.
     private static func automationStatus() -> OSStatus {
+        let host = TerminalHost.automationBundleIdentifier
+        if automationHost != host {
+            automationHost = host
+            automationCached = OSStatus(procNotFound)
+            automationCheckedAt = .distantPast
+            automationAskedAt = nil
+            automationProbeGeneration += 1
+        }
         if !automationProbeRunning, Date().timeIntervalSince(automationCheckedAt) >= 2 {
             automationProbeRunning = true
             let generation = automationProbeGeneration
             Task { @MainActor in
-                let status = await Task.detached(priority: .utility) { probeAutomationStatus() }.value
+                let status = await Task.detached(priority: .utility) { probeAutomationStatus(host: host) }.value
                 if generation == automationProbeGeneration {
                     automationCached = status
                     automationCheckedAt = Date()
@@ -545,13 +553,13 @@ struct Permissions {
         return automationCached
     }
 
-    private nonisolated static func probeAutomationStatus() -> OSStatus {
+    private nonisolated static func probeAutomationStatus(host: String) -> OSStatus {
         // The descriptor owns its AEDesc and disposes it in its own dealloc, so
         // we borrow the pointer and never copy or dispose it ourselves. Copying
         // the struct out and disposing the copy frees the same storage the
         // wrapper later frees, which corrupts the heap and kills the process
         // somewhere else entirely, often minutes later.
-        let terminal = NSAppleEventDescriptor(bundleIdentifier: "com.apple.Terminal")
+        let terminal = NSAppleEventDescriptor(bundleIdentifier: host)
         guard let target = terminal.aeDesc else { return OSStatus(procNotFound) }
         return withExtendedLifetime(terminal) {
             AEDeterminePermissionToAutomateTarget(
@@ -773,7 +781,7 @@ struct Permissions {
             case .active: return "granted"
             case .pendingRestart: return "granted, restart to use it"
             case .unknowable:
-                return "can't be checked while Terminal is closed. Open Terminal"
+                return "can't be checked while \(TerminalHost.resolvedChoice().label) is closed. Open \(TerminalHost.resolvedChoice().label)"
             // macOS returns one code for never-asked and denied, so this row
             // does not pretend to know which. Both are answered the same way:
             // press Grant, which prompts if it can and opens Settings if it
@@ -865,9 +873,11 @@ struct Permissions {
             // is up.
             automationAskedAt = Date()
             automationProbeGeneration += 1
+            let host = TerminalHost.automationBundleIdentifier
+            automationHost = host
             let granted = await Task.detached { () -> Bool in
                 // Borrowed, never disposed. See automationStatus() for why.
-                let terminal = NSAppleEventDescriptor(bundleIdentifier: "com.apple.Terminal")
+                let terminal = NSAppleEventDescriptor(bundleIdentifier: host)
                 guard let target = terminal.aeDesc else { return false }
                 return withExtendedLifetime(terminal) {
                     AEDeterminePermissionToAutomateTarget(

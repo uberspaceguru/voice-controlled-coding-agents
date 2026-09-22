@@ -12,6 +12,11 @@ import Foundation
 /// gets ownership tracking for free from this type rather than a bespoke
 /// bolt-on, and Claude Code writes into the SAME store as Codex rather than
 /// living outside it — one mechanism, not "the thing Codex alone needs."
+public enum SessionOwnershipOrigin: String, Codable, Sendable, Equatable {
+    case appLaunched
+    case external
+}
+
 public struct SessionOwnershipRecord: Codable, Sendable, Equatable {
     public var sessionId: String
     /// `HarnessAdapter.id` ("claude-code", "codex", …).
@@ -21,6 +26,11 @@ public struct SessionOwnershipRecord: Codable, Sendable, Equatable {
     /// for the Terminal.app path `resume()` still uses for Claude Code.
     public var paneId: String?
     public var socketName: String?
+    /// Exact endpoint for externally discovered panes; never infer its namespace.
+    public var socketPath: String?
+    /// Missing in legacy records, whose lifecycle remains app-owned.
+    public var origin: SessionOwnershipOrigin?
+    public var isExternal: Bool { origin == .external }
     public var sessionName: String?
     public var paneTty: String?
     /// The launch directory — carried so `EnrolmentRegistry`'s cwd-prefix
@@ -33,12 +43,15 @@ public struct SessionOwnershipRecord: Codable, Sendable, Equatable {
     public init(sessionId: String, harness: String, pid: Int,
                paneId: String? = nil, socketName: String? = nil,
                sessionName: String? = nil, paneTty: String? = nil,
-               cwd: String? = nil, attachedAt: Date = Date()) {
+               cwd: String? = nil, attachedAt: Date = Date(),
+               socketPath: String? = nil, origin: SessionOwnershipOrigin? = nil) {
         self.sessionId = sessionId
         self.harness = harness
         self.pid = pid
         self.paneId = paneId
         self.socketName = socketName
+        self.socketPath = socketPath
+        self.origin = origin
         self.sessionName = sessionName
         self.paneTty = paneTty
         self.cwd = cwd
@@ -49,8 +62,10 @@ public struct SessionOwnershipRecord: Codable, Sendable, Equatable {
     /// carried one — a tmux-hosted record only.
     public var pane: TmuxPaneAddress? {
         guard let paneId, let paneTty else { return nil }
+        guard !isExternal || socketPath != nil else { return nil }
         return TmuxPaneAddress(socketName: socketName, paneId: paneId,
-                               sessionName: sessionName ?? sessionId, paneTty: paneTty)
+                               sessionName: sessionName ?? sessionId, paneTty: paneTty,
+                               socketPath: socketPath, isExternal: isExternal)
     }
 }
 
@@ -86,7 +101,10 @@ extension SessionOwnershipStore {
     /// arc already made for stale Codex discovery rows
     /// (`SessionDiscovery.discoverCodex`).
     public func verifiedCurrent(sessionId: String) -> SessionOwnershipRecord? {
-        guard let r = current(sessionId: sessionId), ProcessProbe.isAlive(r.pid) else { return nil }
+        // External observations never grant legacy ownership/lifecycle rights,
+        // even if an older caller accidentally persisted one.
+        guard let r = current(sessionId: sessionId), !r.isExternal,
+              ProcessProbe.isAlive(r.pid) else { return nil }
         return r
     }
 
@@ -149,7 +167,7 @@ extension SessionOwnershipStore {
             LampSwitch.rekey(from: $0, to: $1)
         }
     ) -> [LiveSession] {
-        all().filter { $0.harness != ClaudeCodeAdapter().id && ProcessProbe.isAlive($0.pid) }
+        all().filter { !$0.isExternal && $0.harness != ClaudeCodeAdapter().id && ProcessProbe.isAlive($0.pid) }
             .map { original in
                 var record = original
                 if let currentId = activeSessionId(original),

@@ -1058,12 +1058,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // `agents` alone made this a permanent no-op for a live Codex
                 // session (26 Aug) — logged "already gone" and refused to
                 // terminate a process that was, in fact, still running.
-                guard let live = ((ClaudeAgentsCLI().sessions() ?? [])
-                    + FileSessionOwnershipStore.shared.liveNonRegistrySessions())
-                    .first(where: { $0.sessionId == id }) else {
+                guard let ownership = FileSessionOwnershipStore.shared.current(sessionId: id),
+                      !ownership.isExternal else {
+                    await MainActor.run { [weak self] in
+                        self?.hud.finishGoToSession("This agent was started outside Tranquility. Open its terminal to end it.", about: id)
+                    }
+                    return
+                }
+                guard let live = FleetLive.sessions(registry: ClaudeAgentsCLI().sessions() ?? [])
+                    .first(where: { $0.sessionId == id && $0.pid == ownership.pid }) else {
                     Permissions.log("terminate: \(name) (\(id.prefix(8))) not in agents — already gone")
                     Track.record("agent_ended", ["agent_id": Track.hash(id), "outcome": "already_gone"])
                     await MainActor.run { self?.refreshGridAfterTerminate() }
+                    return
+                }
+                guard case .here(let ownedPane, let ownedPid) = AgentLedger.locate(sessionId: id),
+                      ownedPid == ownership.pid, !ownedPane.isExternal else {
+                    await MainActor.run { [weak self] in
+                        self?.hud.finishGoToSession("I couldn't verify this agent's original process. Nothing was ended.", about: id)
+                    }
                     return
                 }
                 // Ending on purpose: disarm remain-on-exit first so the pane
@@ -1073,15 +1086,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // corpse, so ExitWatch never reads it as a death nobody asked
                 // for. Set BEFORE the signal, so there is no window in which
                 // the process dies while the option is still armed.
-                if let paneName = TmuxOwnership.pane(
-                    forSessionId: id, pid: live.pid)?.sessionName {
-                    SessionLauncher.disarmRemainOnExit(session: paneName)
+                if ownedPane.socketPath == nil, ownedPane.socketName == Tmux.socketName {
+                    SessionLauncher.disarmRemainOnExit(session: ownedPane.sessionName)
                 }
                 // The tty the session was seen on, handed to the ladder as the
                 // second half of its identity guard.
                 let outcome = SessionTermination.end(
                     pid: live.pid, named: name,
-                    expectedTty: ProcessProbe.tty(of: live.pid),
+                    expectedTty: ownedPane.paneTty,
                     // The harness comes off the session, not off a default.
                     // With a default it took Claude's, and the guard refused
                     // every Codex row: "pid 46356 is `codex`, not a claude

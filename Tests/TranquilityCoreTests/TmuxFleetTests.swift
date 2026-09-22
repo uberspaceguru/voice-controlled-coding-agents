@@ -65,6 +65,24 @@ final class TmuxFleetTests: XCTestCase {
         XCTAssertNil(TmuxFleet.canonicalSocket("/fixture/\0socket"))
     }
 
+    func testPresentationViewDoesNotReplaceSourceIdentity() throws {
+        let markedView = row(session: "tb-view-a") + "\t" + String(repeating: "a", count: 64)
+        let original = row(session: "z-work") + "\t"
+        let parsed = try XCTUnwrap(TmuxFleet.parsePanes(markedView + "\n" + original, socketPath: socket))
+        XCTAssertEqual(parsed.count, 1)
+        XCTAssertEqual(parsed[0].sessionName, "z-work")
+        XCTAssertEqual(parsed[0].sessionAliases, ["tb-view-a", "z-work"])
+        let identified = identify(parsed[0], processes: processes("claude"),
+                                  registry: [registry(id: first, tmux: "z-work:@1.%1")])
+        XCTAssertEqual(identified.agents.first?.sessionId, first)
+    }
+
+    func testLinkedOriginalSessionAliasRetainsRegistryIdentity() throws {
+        let parsed = try XCTUnwrap(TmuxFleet.parsePanes(row(session: "a-view") + "\n" + row(session: "work"), socketPath: socket)?.first)
+        let identified = identify(parsed, processes: processes("claude"), registry: [registry(id: first)])
+        XCTAssertEqual(identified.agents.first?.sessionId, first)
+    }
+
     func testSamePaneIdOnDifferentSocketsHasDifferentStableIdentity() throws {
         let a = try XCTUnwrap(TmuxFleet.parsePanes(row(), socketPath: "/fixture/server-a")?.first)
         let b = try XCTUnwrap(TmuxFleet.parsePanes(row(), socketPath: "/fixture/server-b")?.first)

@@ -337,6 +337,7 @@ public enum SessionLauncher {
     /// registry against this same pane once the harness has written it.
     static func recordLaunch(sessionId: String, pane: TmuxPaneAddress, adapter: any HarnessAdapter,
                              directory: String, ledger: any SessionOwnershipStore) {
+        guard !pane.isExternal else { return }
         guard let pid = ProcessProbe.pid(onTty: pane.paneTty, containing: sessionId) else {
             Self.trace?("newSession: \(sessionId.prefix(8)) is in \(pane.sessionName) "
                 + "\(pane.paneId) but its pid is not on \(pane.paneTty) yet; the ledger "
@@ -390,6 +391,12 @@ public enum SessionLauncher {
                 + "for \(sessionId.prefix(8)) — refusing rather than spawning a pane with "
                 + "nothing to resume")
             return .failure(ScriptError(message: "\(adapter.id) adapter: empty resume arguments"))
+        }
+        let retained = FileSessionOwnershipStore.shared.current(sessionId: sessionId)
+        if retained?.isExternal == true || (retained == nil && ExistingAgentDirectory.shared
+            .record(sessionId: sessionId, fresh: false) != nil) {
+            return .failure(ScriptError(message: "This agent is observed in an existing terminal. "
+                + "Open that terminal instead of resuming or transferring it.", worthRetrying: false))
         }
         // Nothing has been spawned yet, and past this line something will be.
         // Every resume in the app funnels through here — GO TO AGENT, revive,
@@ -768,6 +775,9 @@ public enum SessionLauncher {
             case .unhosted:
                 break
             case .here(let pane, let pid):
+                if pane.isExternal {
+                    return .refused("already running in an existing tmux pane; observation does not authorize a transfer")
+                }
                 let why = "already in \(pane.sessionName) \(pane.paneId) (pid \(pid)); nothing to transfer"
                 SessionLauncher.trace?("transfer: \(sessionId.prefix(8)) \(why)")
                 return .refused(why)
@@ -1103,22 +1113,9 @@ public enum SessionLauncher {
         HarnessLaunch(harness: adapter.id)
     }
 
-    /// A session that is ALREADY RUNNING is not a failed revive. It is one we
-    /// lost track of, and the fix is to take it back rather than report a
-    /// dead end.
-    ///
-    /// How TB loses one: a revive launches the pane, something downstream
-    /// fails to confirm registration, and no ownership record is written. The
-    /// process is fine and running; TB simply has no address for it. The row
-    /// then still offers "revive", and the next click is refused by the
-    /// guard that exists to stop a second writer forking the transcript. Both
-    /// halves are behaving correctly and the user is stuck (31 Aug: pid 46356
-    /// alive for thirteen minutes while the record still named a pid that
-    /// died the day before).
-    ///
-    /// Everything needed is already known at the point of refusal: the guard
-    /// found the live pid, and `Tmux.pane(forPid:)` turns it into an address.
-    /// Returns the pane it adopted, or nil when there is nothing to adopt.
+    /// Recover a focus address for an already running Codex conversation.
+    /// Only an existing ownership record retains lifecycle authority; a newly
+    /// observed worker stays external and is never enrolled or promoted here.
     @discardableResult
     public static func adoptRunningCodex(
         sessionId: String,
@@ -1126,17 +1123,22 @@ public enum SessionLauncher {
         ownership: any SessionOwnershipStore = FileSessionOwnershipStore.shared
     ) -> TmuxPaneAddress? {
         let holders = ResumeGuard.check(sessionId: sessionId).holders
-        guard let holder = holders.first else { return nil }
-        // By pid first, because that is the process the guard actually saw;
-        // by session id second, for a holder whose pane runs it under a shell.
-        guard let pane = TmuxOwnership.pane(forPid: holder.pid)
-                ?? TmuxOwnership.pane(forSessionId: sessionId, pid: holder.pid)
-        else { return nil }
-        ownership.record(SessionOwnershipRecord(
-            sessionId: sessionId, harness: CodexAdapter().id, pid: holder.pid,
-            paneId: pane.paneId, socketName: pane.socketName,
-            sessionName: pane.sessionName, paneTty: pane.paneTty, cwd: cwd))
-        return pane
+        guard holders.count == 1, let holder = holders.first else { return nil }
+        // Existing ownership is authority only for the same live process.
+        // A tty or legacy namespace alone never turns an external worker into
+        // an app-owned one. Orphaned launches are observed external workers.
+        let retained = ownership.current(sessionId: sessionId)
+        if let retained, !retained.isExternal, retained.pid == holder.pid,
+           let pane = retained.pane, TmuxTerminalView.resolve(pane) != nil { return pane }
+        let observed = ExistingAgentDirectory.shared.record(sessionId: sessionId)
+        return verifiedObservedCodexPane(holderPIDs: holders.map(\.pid), observed: observed)
+    }
+
+    static func verifiedObservedCodexPane(holderPIDs: [Int], observed: SessionOwnershipRecord?) -> TmuxPaneAddress? {
+        guard holderPIDs.count == 1, let holder = holderPIDs.first,
+              let observed, observed.isExternal, observed.harness == "codex", observed.pid == holder,
+              observed.socketPath != nil else { return nil }
+        return observed.pane
     }
 
     @discardableResult
@@ -1208,12 +1210,12 @@ public enum SessionLauncher {
                 usleep(UInt32(deathCheckInterval * 1_000_000))
                 if case .success(let text) = Tmux.run(
                     ["capture-pane", "-p", "-t", pane.stableTarget],
-                    socket: pane.socketName, timeout: 2),
+                    socket: pane.socketName, socketPath: pane.socketPath, timeout: 2),
                    !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     lastScreen = text
                 }
                 if case .failure = Tmux.run(["has-session", "-t", pane.sessionName],
-                                            socket: pane.socketName, timeout: 2) {
+                                            socket: pane.socketName, socketPath: pane.socketPath, timeout: 2) {
                     return verdictForDeath(lastScreen, "exited within "
                         + "\(deathCheckInterval * Double(deathCheckCount))s")
                 }
@@ -1226,7 +1228,7 @@ public enum SessionLauncher {
                 usleep(UInt32(settlePollInterval * 1_000_000))
                 guard case .success(let text) = Tmux.run(
                     ["capture-pane", "-p", "-t", pane.stableTarget],
-                    socket: pane.socketName, timeout: 3)
+                    socket: pane.socketName, socketPath: pane.socketPath, timeout: 3)
                 else {
                     // Exited late, past the fast-death window checked above.
                     // It still gets asked for evidence rather than assumed:
@@ -1291,7 +1293,7 @@ public enum SessionLauncher {
                 case .inconclusive:
                     if let spec, spec.promptNeedles.contains(where: { text.contains($0) }) {
                         Tmux.run(["send-keys", "-t", pane.stableTarget, "Enter"],
-                                 socket: pane.socketName)
+                                 socket: pane.socketName, socketPath: pane.socketPath)
                         Self.trace?("attemptCodexResume: \(sessionId.prefix(8)) accepted the "
                             + "trust prompt on resume")
                     }
@@ -1406,7 +1408,7 @@ public enum SessionLauncher {
     public static func paneTail(pane: TmuxPaneAddress) -> String {
         guard case .success(let text) = Tmux.run(
             ["capture-pane", "-p", "-t", pane.stableTarget],
-            socket: pane.socketName, timeout: 3)
+            socket: pane.socketName, socketPath: pane.socketPath, timeout: 3)
         else { return "" }
         return TrustPromptWatcher.meaningfulTail(text)
     }
@@ -1416,7 +1418,7 @@ public enum SessionLauncher {
         guard let spec = adapter.trustPrompt,
               case .success(let text) = Tmux.run(
                 ["capture-pane", "-p", "-t", pane.stableTarget],
-                socket: pane.socketName, timeout: 3)
+                socket: pane.socketName, socketPath: pane.socketPath, timeout: 3)
         else { return .unknown }
         return classifyPaneScreen(text, spec: spec)
     }
@@ -1445,7 +1447,7 @@ public enum SessionLauncher {
     public static func showPane(pane: TmuxPaneAddress, why: String) -> Bool {
         guard case .success = Tmux.run(
                 ["has-session", "-t", pane.stableTarget],
-                socket: pane.socketName, timeout: 2)
+                socket: pane.socketName, socketPath: pane.socketPath, timeout: 2)
         else {
             Self.trace?("showPane: \(pane.sessionName) on \(pane.paneTty) — \(why), "
                 + "but no window could be opened for it")
@@ -1517,13 +1519,13 @@ public enum SessionLauncher {
         answerResumePrompt: Bool = false,
         onNeedsHuman: (@Sendable (String) -> Void)? = nil
     ) {
-        guard let spec = adapter.trustPrompt else { return }
+        guard !pane.isExternal, let spec = adapter.trustPrompt else { return }
         TrustPromptWatcher.watch(
             spec: spec,
             read: {
                 guard case .success(let text) = Tmux.run(
                     ["capture-pane", "-p", "-t", pane.stableTarget],
-                    socket: pane.socketName, timeout: 3) else { return nil }
+                    socket: pane.socketName, socketPath: pane.socketPath, timeout: 3) else { return nil }
                 return text
             },
             press: { steps in
@@ -1535,10 +1537,10 @@ public enum SessionLauncher {
                 for _ in 0..<abs(steps) {
                     Tmux.run(["send-keys", "-t", pane.stableTarget,
                               steps > 0 ? "Down" : "Up"],
-                             socket: pane.socketName)
+                             socket: pane.socketName, socketPath: pane.socketPath)
                 }
                 Tmux.run(["send-keys", "-t", pane.stableTarget, "Enter"],
-                         socket: pane.socketName)
+                         socket: pane.socketName, socketPath: pane.socketPath)
             },
             trace: Self.trace, label: pane.sessionName,
             answerResumePrompt: answerResumePrompt,

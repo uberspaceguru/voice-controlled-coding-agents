@@ -225,6 +225,18 @@ final class SessionTerminationTests: XCTestCase {
         XCTAssertTrue(why.contains("process group 4242"), why)
     }
 
+    func testPersistedExternalRecordNeverGrantsLifecycleOwnership() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let ledger = FileSessionOwnershipStore(fileURL: url)
+        ledger.record(SessionOwnershipRecord(sessionId: "outside", harness: "codex", pid: 71800, origin: .external))
+        let control = FakeControl(identities: [codex()])
+        let outcome = SessionTermination.end(pid: 71800, named: "outside", expectedCommand: "codex", control: control, ledger: ledger)
+        guard case .refused = outcome else { return XCTFail("external record was treated as ownership") }
+        XCTAssertTrue(control.sent.isEmpty)
+        XCTAssertEqual(control.looks, 0)
+    }
+
     // MARK: - Per-harness expectedCommand (generalized 22 Aug: the guard was
     // hardcoded to Claude Code, and live-tested REFUSED to end a genuine,
     // ownership-verified Codex session — "pid 71800 is `codex`, not a Claude

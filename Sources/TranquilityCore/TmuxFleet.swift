@@ -45,6 +45,9 @@ public enum TmuxFleet {
         /// verified session-to-process association, unresolved, or none
         /// (ordinary shell with no candidate). Never dispatch readiness.
         public var identityStatus: String
+        /// Linked views share one physical pane. Keep source session aliases so
+        /// a presentation-only view cannot invalidate an agent's registry claim.
+        public var sessionAliases: [String]? = nil
     }
 
     public struct Agent: Codable, Sendable, Equatable {
@@ -76,7 +79,7 @@ public enum TmuxFleet {
     static let maximumPaneRows = 4096
     static let paneFormat = ["session_name", "window_id", "window_name", "pane_id", "pane_pid",
                              "pane_tty", "pane_current_path", "pane_current_command", "pane_dead",
-                             "session_attached"].map { "#{\($0)}" }.joined(separator: "\t")
+                             "session_attached", "@tb-view-source"].map { "#{\($0)}" }.joined(separator: "\t")
 
     public static func scan(extraSockets: [String] = []) -> Snapshot {
         let started = ProcessInfo.processInfo.systemUptime
@@ -184,7 +187,8 @@ public enum TmuxFleet {
     static func discoveredSockets(extraSockets: [String]) -> [String] {
         let fm = FileManager.default
         return socketCandidates(uid: getuid(), support: Tmux.socketDirectory.path,
-                                tmux: ProcessInfo.processInfo.environment["TMUX"], extra: extraSockets) { directory in
+                                tmux: ProcessInfo.processInfo.environment["TMUX"],
+                                extra: extraSockets + FleetConfig.socketPaths() + FleetConfig.processSocketPaths()) { directory in
             guard let entries = try? fm.contentsOfDirectory(atPath: directory) else { return [] }
             return entries.sorted().compactMap { name in
                 let path = (directory as NSString).appendingPathComponent(name)
@@ -226,16 +230,23 @@ public enum TmuxFleet {
         // Linked windows repeat a physical pane under several sessions. Pick
         // a deterministic representative; attachment count refers to that
         // session only. Socket + pane remains the physical identity.
-        for line in lines.sorted() {
+        func isView(_ line: Substring) -> Bool {
+            let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+            return f.count == 11 && f[0].hasPrefix("tb-view-") && f[10].count == 64
+                && f[10].allSatisfy { $0.isHexDigit }
+        }
+        for line in lines.sorted(by: { isView($0) == isView($1) ? $0 < $1 : !isView($0) }) {
             let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 10, !fields[0].isEmpty, fields[1].hasPrefix("@"),
+            guard [10, 11].contains(fields.count), !fields[0].isEmpty, fields[1].hasPrefix("@"),
                   fields[3].hasPrefix("%"), Int(fields[3].dropFirst()) != nil,
                   let pid = Int(fields[4]), pid > 0 || (pid == 0 && fields[8] == "1"),
                   fields[5].hasPrefix("/dev/") || (fields[5].isEmpty && fields[8] == "1"),
                   ["0", "1"].contains(fields[8]),
                   let clients = Int(fields[9]), clients >= 0 else { return nil }
-            if let prior = result[fields[3]] {
+            if var prior = result[fields[3]] {
                 guard prior.pid == pid, prior.tty == fields[5], prior.windowId == fields[1] else { return nil }
+                prior.sessionAliases = Array(Set((prior.sessionAliases ?? [prior.sessionName]) + [fields[0]])).sorted()
+                result[fields[3]] = prior
                 continue
             }
             result[fields[3]] = Pane(id: paneIdentity(socketPath: socketPath, paneId: fields[3]),
@@ -243,7 +254,7 @@ public enum TmuxFleet {
                                windowName: fields[2], paneId: fields[3], pid: pid, tty: fields[5],
                                cwd: fields[6], command: fields[7], dead: fields[8] == "1",
                                attachedClientCount: clients, agents: [], candidateHarnesses: [],
-                               identityStatus: "unresolved")
+                               identityStatus: "unresolved", sessionAliases: [fields[0]])
         }
         return result.values.sorted { $0.paneId < $1.paneId }
     }
@@ -287,7 +298,7 @@ public enum TmuxFleet {
 
     static func matchingRecord(_ record: SessionOwnershipRecord, pane: Pane,
                                processes: [Int: ProcessRow]) -> Bool {
-        record.paneId == pane.paneId && record.sessionName == pane.sessionName
+        record.paneId == pane.paneId && (pane.sessionAliases ?? [pane.sessionName]).contains(record.sessionName ?? "")
             && record.paneTty == pane.tty && process(record.pid, belongsTo: pane, processes: processes)
     }
 
@@ -383,7 +394,7 @@ public enum TmuxFleet {
                 let claims = registry.filter { $0.pid == row.pid && $0.kind != "bg" && $0.kind != "background" }
                 if !claims.isEmpty { candidates.insert("claude-code") }
                 if Set(claims.map(\.sessionId)).count == 1, let entry = claims.max(by: { ($0.updatedAt ?? 0) < ($1.updatedAt ?? 0) }),
-                   entry.tmux == nil || (entry.paneId == pane.paneId && entry.tmuxSessionName == pane.sessionName),
+                   entry.tmux == nil || (entry.paneId == pane.paneId && (pane.sessionAliases ?? [pane.sessionName]).contains(entry.tmuxSessionName ?? "")),
                    candidateHarness(row.command) == "claude-code" || row.command == "node" {
                     agents.append(Agent(sessionId: entry.sessionId, harness: "claude-code", pid: row.pid,
                                         name: entry.name, status: entry.status,

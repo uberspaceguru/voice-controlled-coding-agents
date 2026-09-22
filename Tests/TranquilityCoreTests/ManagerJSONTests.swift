@@ -40,6 +40,7 @@ final class ManagerJSONTests: XCTestCase {
         XCTAssertEqual(brief.project, "kopi-outreach")
         XCTAssertEqual(brief.goal, "ship the outreach CRM")
         XCTAssertEqual(brief.why, "the reducer was the bug")
+        XCTAssertEqual(brief.recordedAtMs, try store.latestStop(for: "sess-1")?.createdAtMs)
         XCTAssertEqual(brief.rungs.map(\.kind), ["goal", "findings", "solution", "why", "message"])
         XCTAssertFalse(brief.rungs.contains { $0.spoken.isEmpty })
     }

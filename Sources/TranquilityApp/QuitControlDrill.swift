@@ -36,6 +36,46 @@ enum QuitControlDrill {
 
         hud.showIdle(rows: [])
         await check("empty grid")
+        // The same real controls receive workers discovered on another
+        // server; their session ID, not a tab title or row position, survives
+        // the click. These are synthetic observations, never live agents.
+        let observations = [
+            SessionOwnershipRecord(sessionId: "external-alpha", harness: "codex", pid: 101,
+                paneId: "%0", sessionName: "work", origin: .external),
+            SessionOwnershipRecord(sessionId: "external-beta", harness: "claude-code", pid: 102,
+                paneId: "%0", sessionName: "work", origin: .external),
+        ]
+        let rows = FleetLive.merging([], records: observations).map {
+            SessionRow(id: $0.sessionId, name: $0.name ?? $0.sessionId,
+                       aux: $0.sessionId, lamp: .working, harness: $0.harness)
+        }
+        var focused: [String] = []
+        var revived: [String] = []
+        hud.onGoToSession = { focused.append($0) }
+        hud.onRevive = { id, _ in revived.append(id) }
+        hud.showIdle(rows: rows)
+        await check("external fleet grid")
+        func controls(_ view: NSView) -> [NSControl] {
+            ((view as? NSControl).map { [$0] } ?? [])
+                + view.subviews.flatMap { controls($0) }
+        }
+        if let root = hud.panel?.contentView {
+            let rendered = controls(root)
+            for row in rows {
+                let control = rendered.first { $0.identifier?.rawValue == row.id }
+                checks.append(("external row \(row.id) rendered", control != nil))
+                if let control { _ = control.sendAction(control.action, to: control.target) }
+            }
+            checks.append(("external row exact identities", focused == rows.map(\.id)))
+            checks.append(("external rows never revive", revived.isEmpty))
+            if let flag = CommandLine.arguments.firstIndex(of: "--fleet-control-shot"),
+               flag + 1 < CommandLine.arguments.count,
+               let bitmap = root.bitmapImageRepForCachingDisplay(in: root.bounds) {
+                root.cacheDisplay(in: root.bounds, to: bitmap)
+                try? bitmap.representation(using: .png, properties: [:])?
+                    .write(to: URL(fileURLWithPath: CommandLine.arguments[flag + 1]))
+            }
+        }
         hud.setManager(on: true)
         hud.showIdle(rows: [])
         hud.setManagerState(StatusHUD.orbState, line: "listening")
