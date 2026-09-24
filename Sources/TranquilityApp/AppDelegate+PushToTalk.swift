@@ -309,6 +309,11 @@ extension AppDelegate {
                 Analytics.gesture("ctrl_ctrl", phase: "tapped", decision: "ignored_mic_open", face: hud.state)
                 return
             }
+            // A right-hand's card offers More (24 Sep, ruling 5): ⌃⌃ asks it.
+            if moreOnBrainCard() {
+                Analytics.gesture("ctrl_ctrl", phase: "tapped", decision: "brain_more", face: hud.state)
+                return
+            }
             guard let announcement = lastAnnouncement else {
                 // Quiet, not spoken: nothing has been announced this launch, and
                 // the voice is the away-channel — it never narrates empty state.

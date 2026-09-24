@@ -208,6 +208,12 @@ public struct SessionRow: Equatable, Sendable {
     /// `observedAt` is the turn's own timestamp and is the only local source
     /// this field may have. `scripts/check-row-dates.sh` holds that.
     public let lastActivity: Date?
+    /// A right-hand the user named (`RightHands`): drawn on the grid in the
+    /// roster's order whatever its lamp (24 Sep, "four rows, not fifty").
+    public var pinned: Bool = false
+    /// A line inside an expanded right-hand (the accordion, 24 Sep): drawn
+    /// directly under the row with this id, never on its own.
+    public var parentId: String? = nil
 
     /// **What this amber is, for the failure stream.** Nil on every lamp but
     /// amber, and on the one amber the person caused a second ago by switching
@@ -307,6 +313,15 @@ public struct SessionRow: Equatable, Sendable {
                    revivable: revivable, read: read, switchedOff: true,
                    detail: detail, harness: harness, door: door,
                    hasRecordedTurn: hasRecordedTurn, fault: fault)
+    }
+
+    /// The same row, pinned or placed under a parent. Copies rather than
+    /// mutation at the call site, because every other field is `let`.
+    public func placed(pinned: Bool, parentId: String? = nil) -> SessionRow {
+        var copy = self
+        copy.pinned = pinned
+        copy.parentId = parentId
+        return copy
     }
 
     /// What the pointer gets when it rests on a row: the full name, and
@@ -695,6 +710,14 @@ public struct SessionRow: Equatable, Sendable {
     /// membership into it collapsed the floor and shipped a regression
     /// earlier the same evening (18 Aug).
     public static func gridRows(_ rows: [SessionRow], capacity: Int, floor: Int) -> [SessionRow] {
+        // THE RIGHT-HANDS ARE THE GRID (24 Sep). When the user has named the
+        // agents the panel is for, the grid is those rows in the order they
+        // named them, each followed by its expanded lines, whatever their
+        // lamps. Everything else is already filed and is Past Agents.
+        if rows.contains(where: \.pinned) {
+            let top = rows.filter { $0.pinned && !$0.switchedOff }
+            return top.flatMap { parent in [parent] + rows.filter { $0.parentId == parent.id } }
+        }
         let eligible = rows.filter { !$0.switchedOff }
         let lit = eligible.filter { $0.lamp.isLit }
         let alive = eligible.filter { $0.lamp == .running }
@@ -726,6 +749,9 @@ public struct SessionRow: Equatable, Sendable {
     /// lit lamps. Everything else — idle, switched off, exited — is the
     /// list.
     public static func shownCount(_ rows: [SessionRow], capacity: Int, floor: Int) -> Int {
+        if rows.contains(where: \.pinned) {
+            return min(capacity, gridRows(rows, capacity: capacity, floor: floor).count)
+        }
         let lit = rows.filter { $0.lamp.isLit && !$0.switchedOff }.count
         return min(capacity, max(floor, lit))
     }

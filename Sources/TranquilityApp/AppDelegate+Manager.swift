@@ -66,7 +66,10 @@ extension AppDelegate {
                 spoken: spoken,
                 sessionId: session,
                 pid: live?.pid,
-                project: event.map { tabDisplayName(for: $0, live: live) }
+                // The card names the speaker by the user's name for it
+                // (24 Sep, ruling 7): "Director", never a chat's title.
+                project: RightHands.pinnedName(for: session)
+                    ?? event.map { tabDisplayName(for: $0, live: live) }
                     ?? (live?.cwd as NSString?)?.lastPathComponent ?? "",
                 cwd: event?.cwd ?? live?.cwd,
                 eventId: session,

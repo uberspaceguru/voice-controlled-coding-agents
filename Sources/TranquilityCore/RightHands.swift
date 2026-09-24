@@ -68,6 +68,18 @@ public enum RightHands {
             self.ask = ask
         }
 
+        /// A hand named in the file with nothing to find it by yet: "TeamChat
+        /// Manager (placeholder until it exists)", 24 Sep. It still holds its
+        /// row, under an id no session can have.
+        public var isPlaceholder: Bool {
+            name != nil && (session ?? "").isEmpty && (cwd ?? "").isEmpty && (tmux ?? "").isEmpty
+        }
+        public var placeholderId: String? {
+            guard isPlaceholder, let name else { return nil }
+            let slug = name.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
+            return "hand:" + String(slug)
+        }
+
         /// Whether this hand's card is its projects rather than its last turn.
         public var hasCard: Bool { projects?.isEmpty == false || rollup != nil }
         /// Whether a reply to this hand is asked of its brain rather than typed.
@@ -127,6 +139,12 @@ public enum RightHands {
             var names: [String: String] = [:]
             var rollups: [String: String] = [:]
             var byId: [String: Hand] = [:]
+            for hand in hands {
+                guard let id = hand.placeholderId else { continue }
+                ids.insert(id)
+                byId[id] = hand
+                names[id] = hand.name
+            }
             // Explicit ids are hands whether or not anything is running under
             // them: a name has to resolve for a row built from disk too.
             for hand in hands {
@@ -147,8 +165,18 @@ public enum RightHands {
                 if let name = hand.name { names[session.id] = name }
                 if let rollup = hand.rollup { rollups[session.id] = rollup }
             }
+            // The roster's own order, one id per hand, for the grid: the id a
+            // live session resolved to, else the file's explicit id, else the
+            // placeholder's.
+            var order: [String] = []
+            for hand in hands {
+                let resolvedId = byId.filter { $0.value == hand && $0.key.count >= 32 }.keys.sorted().first
+                if let id = hand.placeholderId ?? resolvedId ?? hand.session, !order.contains(id) {
+                    order.append(id)
+                }
+            }
             return Resolved(ids: ids, names: names, rollups: rollups,
-                            summarizeOthers: summarizeOthers, hands: byId)
+                            summarizeOthers: summarizeOthers, hands: byId, order: order)
         }
     }
 
@@ -161,15 +189,18 @@ public enum RightHands {
         public var summarizeOthers: Bool
         /// The hand each resolved id belongs to.
         public var hands: [String: Hand]
+        /// One id per hand, in the file's order: the grid's order.
+        public var order: [String]
 
         public init(ids: Set<String>, names: [String: String] = [:],
                     rollups: [String: String] = [:], summarizeOthers: Bool = false,
-                    hands: [String: Hand] = [:]) {
+                    hands: [String: Hand] = [:], order: [String] = []) {
             self.ids = ids
             self.names = names
             self.rollups = rollups
             self.summarizeOthers = summarizeOthers
             self.hands = hands
+            self.order = order
         }
 
         public func contains(_ sessionId: String) -> Bool { ids.contains(sessionId) }
@@ -454,11 +485,16 @@ public enum RightHands {
         /// A whole-fleet count to say instead of counting the projects shown,
         /// when the source knows more than five things.
         public var totals: String?
+        /// How many things need the user across the whole source, not only
+        /// the five shown. The row's dot, and the accordion's first line.
+        public var needsYou: Int
 
-        public init(projects: [Project], updatedAt: String? = nil, totals: String? = nil) {
+        public init(projects: [Project], updatedAt: String? = nil, totals: String? = nil,
+                    needsYou: Int? = nil) {
             self.projects = projects
             self.updatedAt = updatedAt
             self.totals = totals
+            self.needsYou = needsYou ?? projects.filter { $0.state == .needsYou }.count
         }
 
         public static func load(path: String) -> Rollup? {
@@ -532,7 +568,8 @@ public enum RightHands {
                 if n > 0 { parts.append("\(n) \(key == "needs_you" && n == 1 ? "needs you" : word)") }
             }
             return Rollup(projects: Array(projects.prefix(limit)),
-                          totals: parts.isEmpty ? nil : parts.joined(separator: ", ") + ".")
+                          totals: parts.isEmpty ? nil : parts.joined(separator: ", ") + ".",
+                          needsYou: rows("needs_you").count)
         }
 
         /// One sentence, at most about twenty words: a worker note can be a
@@ -600,5 +637,139 @@ public enum RightHands {
         if let hand = hand(for: sessionId), hand.hasCard { return card(for: hand) }
         guard let path = rollupPath(for: sessionId) else { return nil }
         return Rollup.load(path: path)
+    }
+
+    // MARK: - The accordion (24 Sep)
+
+    /// What an opened right-hand shows under its row, in Ahmed's drawing:
+    /// one short line ("5 things need you"), the first three items, then
+    /// "more…". "So that it never really overwhelms me."
+    public enum Accordion {
+        public static let shown = 3
+
+        /// The row ids an opened hand's lines wear: `<parent>#summary`,
+        /// `<parent>#item-<n>`, `<parent>#more`. Parsed back by `part(of:)`.
+        public enum Part: Equatable, Sendable {
+            case summary, item(Int), more
+        }
+
+        public static func id(_ parent: String, _ part: Part) -> String {
+            switch part {
+            case .summary: return parent + "#summary"
+            case .item(let n): return parent + "#item-\(n)"
+            case .more: return parent + "#more"
+            }
+        }
+
+        public static func part(of id: String) -> (parent: String, part: Part)? {
+            guard let hash = id.lastIndex(of: "#") else { return nil }
+            let parent = String(id[..<hash]), tail = id[id.index(after: hash)...]
+            switch tail {
+            case "summary": return (parent, .summary)
+            case "more": return (parent, .more)
+            default:
+                guard tail.hasPrefix("item-"), let n = Int(tail.dropFirst(5)) else { return nil }
+                return (parent, .item(n))
+            }
+        }
+
+        /// The first line, said and drawn.
+        public static func summary(_ card: Rollup) -> String {
+            switch card.needsYou {
+            case 0: return "Nothing needs you"
+            case 1: return "1 thing needs you"
+            default: return "\(card.needsYou) things need you"
+            }
+        }
+
+        /// The one sentence a tap on the hand speaks: the count, and the first
+        /// thing with its subject named (ruling 5's shape).
+        public static func sentence(_ card: Rollup) -> String {
+            guard let first = card.projects.first else { return summary(card) + "." }
+            let what = first.line.isEmpty ? first.name : "\(first.name): \(first.line)"
+            return summary(card) + "; first, " + Rollup.sentence(what)
+        }
+
+        /// What a tap on one item speaks: whose it is, and what it needs.
+        public static func itemSentence(_ project: Rollup.Project) -> String {
+            let state: String
+            switch project.state {
+            case .needsYou: state = "needs you"
+            case .ready: state = "is ready"
+            case .moving: state = "is moving"
+            }
+            return project.line.isEmpty ? "\(project.name) \(state)."
+                : "\(project.name) \(state). " + Rollup.sentence(project.line)
+        }
+
+        /// The lines, as rows under `parent`. A needs-you item wears the dot;
+        /// every other line is hollow. Each opens its card, which is why each
+        /// carries a recorded turn.
+        public static func rows(parent: String, card: Rollup) -> [SessionRow] {
+            var out = [SessionRow(id: id(parent, .summary), name: summary(card), aux: "",
+                                  lamp: .running, read: .opened, hasRecordedTurn: true)
+                .placed(pinned: false, parentId: parent)]
+            for (index, project) in card.projects.prefix(shown).enumerated() {
+                let label = project.line.isEmpty ? project.name : "\(project.name): \(project.line)"
+                out.append(SessionRow(id: id(parent, .item(index + 1)), name: label, aux: "",
+                                      lamp: project.state == .needsYou ? .ready : .running,
+                                      read: .opened, detail: itemSentence(project),
+                                      hasRecordedTurn: true)
+                    .placed(pinned: false, parentId: parent))
+            }
+            out.append(SessionRow(id: id(parent, .more), name: "more…", aux: "", lamp: .running,
+                                  read: .opened, hasRecordedTurn: true)
+                .placed(pinned: false, parentId: parent))
+            return out
+        }
+    }
+
+    // MARK: - The card cache
+
+    /// The last card each hand's `projects` command printed, refreshed off
+    /// the main thread (CLAUDE.md rule 9: a subprocess never runs where a
+    /// frame is drawn). The grid reads it for the dot and the accordion on
+    /// every repaint; the tick refreshes it when it is older than `maxAge`.
+    public final class CardCache: @unchecked Sendable {
+        public static let shared = CardCache()
+        private let lock = NSLock()
+        private var cards: [String: (card: Rollup, at: Date)] = [:]
+        private var inFlight = Set<String>()
+
+        public init() {}
+
+        public func card(for id: String) -> Rollup? {
+            lock.lock(); defer { lock.unlock() }
+            return cards[id]?.card
+        }
+
+        public func put(_ card: Rollup, for id: String, at: Date = Date()) {
+            lock.lock(); cards[id] = (card, at); lock.unlock()
+        }
+
+        /// Which of these hands are due a refresh, claimed so two ticks never
+        /// run the same command at once.
+        public func claimStale(_ ids: [String], maxAge: TimeInterval, now: Date = Date()) -> [String] {
+            lock.lock(); defer { lock.unlock() }
+            let due = ids.filter { id in
+                !inFlight.contains(id) && (cards[id].map { now.timeIntervalSince($0.at) >= maxAge } ?? true)
+            }
+            inFlight.formUnion(due)
+            return due
+        }
+
+        public func release(_ id: String) {
+            lock.lock(); inFlight.remove(id); lock.unlock()
+        }
+
+        /// Run each due hand's command and keep what it printed. Blocking;
+        /// call it detached.
+        public func refresh(_ hands: [String: Hand], maxAge: TimeInterval = 30) {
+            let due = claimStale(hands.filter { $0.value.hasCard }.map(\.key), maxAge: maxAge)
+            for id in due {
+                defer { release(id) }
+                if let hand = hands[id], let card = RightHands.card(for: hand) { put(card, for: id) }
+            }
+        }
     }
 }

@@ -100,6 +100,16 @@ public extension GridAssembler {
         /// stands green — ready to be talked to — whether or not any session
         /// is running under its id, and a tap opens its card.
         public var brains: [String: String]
+        /// The right-hands in the roster's order, one id each: the grid, in
+        /// Ahmed's drawing of 24 Sep. Empty is the panel as it was.
+        public var handOrder: [String]
+        /// Names for hands that may have no row at all (a placeholder).
+        public var handNames: [String: String]
+        /// The last card each carded hand printed (`RightHands.CardCache`):
+        /// its dot, and its lines when it is open.
+        public var cards: [String: RightHands.Rollup]
+        /// The hand that is open, if any.
+        public var expanded: String?
 
         /// What the poller last saw, in the shape the bands need.
         public struct RemoteAgents {
@@ -149,7 +159,11 @@ public extension GridAssembler {
             remote: RemoteAgents = RemoteAgents(),
             livenessKnown: Bool = true,
             rightHands: Set<String>? = nil,
-            brains: [String: String] = [:]
+            brains: [String: String] = [:],
+            handOrder: [String] = [],
+            handNames: [String: String] = [:],
+            cards: [String: RightHands.Rollup] = [:],
+            expanded: String? = nil
         ) {
             self.waiting = waiting
             self.known = known
@@ -169,6 +183,10 @@ public extension GridAssembler {
             self.remote = remote
             self.rightHands = rightHands
             self.brains = brains
+            self.handOrder = handOrder
+            self.handNames = handNames
+            self.cards = cards
+            self.expanded = expanded
         }
     }
 
@@ -286,6 +304,36 @@ public extension GridAssembler {
         }
         cache = cache.filter { now.timeIntervalSince($0.value.at) < grace }
         return (liveById, cache)
+    }
+
+    /// One right-hand's row in the drawing: its name, a dot or not, nothing
+    /// else. The dot is "something for Ahmed": a turn waiting (green) or a
+    /// process stopped on him (amber). A brain's dot is its card's needs-you
+    /// count. A dead hand keeps its unlit lamp, and its revive; a hand the
+    /// user switched off stays off. A placeholder is a greyed row that says
+    /// it is not running yet.
+    static func handRow(id: String, existing: SessionRow?, input: RowInputs) -> SessionRow? {
+        let name = input.handNames[id] ?? input.brains[id] ?? existing?.name ?? id
+        if let brain = input.brains[id] {
+            let dot = (input.cards[id]?.needsYou ?? 0) > 0
+            return SessionRow(id: id, name: brain, aux: "", lamp: dot ? .ready : .running,
+                              revivable: false, read: .opened,
+                              detail: input.cards[id].map { RightHands.Accordion.summary($0) },
+                              hasRecordedTurn: true)
+                .placed(pinned: true)
+        }
+        guard let row = existing else {
+            return SessionRow(id: id, name: name, aux: "", lamp: .unlit, revivable: false,
+                              detail: "\(name) isn't running yet.")
+                .placed(pinned: true)
+        }
+        if row.switchedOff { return row }
+        let lamp: Lamp = row.lamp.asksForYou ? .ready : (row.lamp == .unlit ? .unlit : .running)
+        return SessionRow(id: row.id, name: name, aux: "", lamp: lamp, revivable: row.revivable,
+                          read: row.read, detail: row.detail ?? row.aux, harness: row.harness,
+                          door: row.door, hasRecordedTurn: row.hasRecordedTurn,
+                          lastActivity: row.lastActivity)
+            .placed(pinned: true)
     }
 
     /// The four bands, in order, and the rules that order them.
@@ -659,6 +707,25 @@ public extension GridAssembler {
                 else { return row }
                 return row.switchedOffCopy()
             }
+        }
+
+        // FOUR ROWS, NOT FIFTY (24 Sep). With a roster that names its order,
+        // the hands lead in that order, each wearing a dot when it has
+        // something for the user and nothing else on the row; the open hand's
+        // lines follow it. Everything else was filed above.
+        if !input.handOrder.isEmpty {
+            let byId = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var pinned: [SessionRow] = []
+            for id in input.handOrder {
+                guard let row = Self.handRow(id: id, existing: byId[id], input: input) else { continue }
+                pinned.append(row)
+                if input.expanded == id, let card = input.cards[id] {
+                    pinned += RightHands.Accordion.rows(parent: id, card: card)
+                }
+            }
+            let taken = Set(input.handOrder)
+            return RowVerdict(rows: pinned + SessionRow.quietRowsLast(rows.filter { !taken.contains($0.id) }),
+                              clearSwitches: clear, harnessById: harnessById)
         }
 
         // Last, and after every band has been appended: a session that is

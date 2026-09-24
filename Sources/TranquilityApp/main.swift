@@ -252,6 +252,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// How many right-hands the last repaint resolved; -1 is "no roster". Logged
     /// on change only, like the Codex count above it.
     var lastRightHandCount = -2
+    /// The right-hand whose lines are open on the grid (the accordion), if any.
+    var expandedHand: String?
     /// Which harness each session runs, rebuilt every repaint from the live
     /// map and the rows. One map, so the card and the grid cannot disagree.
     var harnessById: [String: String] = [:]
@@ -1112,7 +1114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         // The separate waiting-list face is gone: the idle grid IS the list.
-        hud.onPickWaiting = { [weak self] id in self?.announceNext(only: id) }
+        hud.onPickWaiting = { [weak self] id in self?.pick(id) }
         hud.onNewSession = { [weak self] in self?.newSession() }
         hud.onManagerToggle = { [weak self] in self?.toggleManagerMode() }
         hud.managerAvailable = ManagerConfig.availability() != .unset

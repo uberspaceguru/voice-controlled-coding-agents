@@ -1635,6 +1635,21 @@ extension AppDelegate {
             Track.record("go_to_agent", props)
         }
         Task.detached { [weak self] in
+            // GHOSTTY FIRST (24 Sep, Ahmed): a session that lives in a tmux
+            // pane is opened by attaching a Ghostty window to that pane where
+            // it is, on whichever socket holds it, never moved into ours and
+            // never shown in Terminal.
+            switch GhosttyDoor.open(sessionId: sessionId) {
+            case .opened(let socket, let session):
+                Permissions.log("goTo: \(sessionId.prefix(8)) -> Ghostty on \(socket)/\(session)")
+                report("ghostty", nil)
+                await MainActor.run { [weak self] in self?.hud.finishGoToSession(nil, about: sessionId) }
+                return
+            case .failed(let why):
+                Permissions.log("goTo: Ghostty failed for \(sessionId.prefix(8)): \(why); trying the old door")
+            case .notInTmux, .notInstalled:
+                break
+            }
             // `agents` alone made GO TO AGENT a permanent no-op for every
             // Codex session (26 Aug) — silently logged and returned, never
             // navigated, because Codex has no registry to appear in here.

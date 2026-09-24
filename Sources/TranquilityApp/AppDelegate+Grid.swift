@@ -215,7 +215,14 @@ extension AppDelegate {
             rightHands: hands?.ids,
             brains: (hands?.hands ?? [:]).reduce(into: [String: String]()) { out, pair in
                 if pair.value.asks { out[pair.key] = pair.value.name ?? "Director" }
-            }))
+            },
+            handOrder: hands?.order ?? [],
+            handNames: hands?.names ?? [:],
+            cards: (hands?.hands ?? [:]).keys.reduce(into: [String: RightHands.Rollup]()) { out, id in
+                if let card = RightHands.CardCache.shared.card(for: id) { out[id] = card }
+            },
+            expanded: expandedHand))
+        if let hands { refreshHandCards(hands.hands) }
 
         // Recorded before anything is drawn so the card can ask the same
         // question the rows answered, and get the same answer.
