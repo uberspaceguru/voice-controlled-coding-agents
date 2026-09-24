@@ -680,6 +680,13 @@ class Manager(FrameProcessor):
             return
         self._last_intent, self._last_intent_at = intent, now
         self.addressed += 1
+        if self.stage and self.stage.get("asks") and intent in STAGE_QUESTIONS | set(RUNG_FOR):
+            # With a brain on stage, a question about the work or an instruction
+            # goes to that brain whole; it knows its projects better than a
+            # brief does, and it acts on what it is told.
+            await self._earcon("listening")
+            await self._ask_brain(self.stage, text)
+            return
         # The activation cue covers latency you would otherwise fill by repeating
         # yourself. An invite or a rung speaks within a second; a cue there lands
         # on top of the voice. Only the slow intents get one.
@@ -1118,6 +1125,26 @@ class Manager(FrameProcessor):
 
     # -- the app's commands, and a named agent -------------------------------------
 
+    async def _ask_brain(self, target: dict, text: str):
+        """`tbase ask`: the hand's brain answers, and the answer is spoken in the
+        hand's own voice through the app's `say` verb. The conversation is the
+        hand's session id, the same thread the card uses."""
+        from urllib.parse import quote
+        sid = target["sessionId"]
+        who = target.get("name") or "the agent"
+        note("you", text, "acted")
+        await emit(self, "tool", argv=["tbase", "ask", sid[:8]], meaning="asking")
+        code, out = await _run(TBASE, "ask", sid, text, "--conversation", sid, timeout=75)
+        answer = " ".join(out.split()) if code == 0 else ""
+        if not answer:
+            logger.error(f"ask {who} failed ({code}): {out[-300:]}")
+            await self._say(f"{who} didn't answer.")
+            return
+        spoken_line = spoken(answer)[:600]
+        await emit(self, "speaking", voice="agent", session=sid, text=spoken_line[:160])
+        note(who, spoken_line, "spoken")
+        await self._app_speaks(f"{SCHEME}://say?session={sid}&text={quote(spoken_line)}", spoken_line)
+
     async def _drain_commands(self):
         """Lines the app sends down (`{"cmd": "stage", ...}`), from stdin when
         local and from the socket when hosted; see session.commands."""
@@ -1163,7 +1190,14 @@ class Manager(FrameProcessor):
                    name=target.get("name"), project=target.get("project"))
         if len(rest.split()) < 2:
             # Only the name: open a message to it and take dictation.
-            await self._open({"kind": "agent", "sessionId": target["sessionId"], "name": name})
+            await self._open({"kind": "agent", "sessionId": target["sessionId"], "name": name,
+                              "asks": bool(target.get("asks"))})
+            return
+        if target.get("asks"):
+            # A hand with a brain is ASKED, not typed into: "Director, what's
+            # blocking the design work?" goes to `director ask` and the answer
+            # is spoken in Director's voice (24 Sep).
+            await self._ask_brain(target, rest)
             return
         await self._earcon("listening")
         try:

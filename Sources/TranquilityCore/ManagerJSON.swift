@@ -32,6 +32,9 @@ public enum ManagerJSON {
         /// every row when there is one, so the manager can keep the hands
         /// and drop the rest without a second read.
         public var rightHand: Bool?
+        /// Whether what is said to this session is ASKED of its brain
+        /// (`tbase ask`) rather than typed into its pane. Absent unless true.
+        public var asks: Bool?
     }
 
     public struct WaitingRow: Codable, Equatable, Sendable {
@@ -95,8 +98,23 @@ public enum ManagerJSON {
                 enrolled: isEnrolled(s.sessionId, s.cwd),
                 goal: brief?.goal, topic: brief?.topic ?? stop?.briefTopic,
                 waiting: waiting.contains(s.sessionId),
-                rightHand: rightHands.map { $0.contains(s.sessionId) })
-        }
+                rightHand: rightHands.map { $0.contains(s.sessionId) },
+                asks: (rightHands?.hands[s.sessionId]?.asks ?? false) ? true : nil)
+        } + brains(rightHands, excluding: Set(live.map(\.sessionId)))
+    }
+
+    /// Right-hands with a brain and no live process: Director is a command,
+    /// not a pane (24 Sep), and still has to be a target the manager can name.
+    static func brains(_ resolved: RightHands.Resolved?, excluding live: Set<String>) -> [Target] {
+        guard let resolved else { return [] }
+        return resolved.hands
+            .filter { $0.value.asks && !live.contains($0.key) && $0.key.count >= 32 }
+            .sorted { $0.key < $1.key }
+            .map { id, hand in
+                Target(sessionId: id, harness: "brain", pid: 0, status: "ready", cwd: hand.cwd,
+                       project: hand.name ?? "", name: hand.name, enrolled: true,
+                       goal: nil, topic: nil, waiting: false, rightHand: true, asks: true)
+            }
     }
 
     public static func status(store: QueueStore,

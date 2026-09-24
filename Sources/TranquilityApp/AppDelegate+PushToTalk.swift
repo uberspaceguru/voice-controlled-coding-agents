@@ -764,7 +764,7 @@ extension AppDelegate {
                         // what you say next is a question about its projects
                         // or an instruction typed into it. A pick only, never
                         // ⌃⌥ — the automatic path must not turn a microphone on.
-                        if eventId != nil, RightHands.rollupPath(for: announcement.event.sessionId) != nil {
+                        if eventId != nil, RightHands.hand(for: announcement.event.sessionId)?.hasCard == true {
                             self.stageForManager(session: announcement.event.sessionId, name: name)
                         }
                         return true

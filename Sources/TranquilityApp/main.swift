@@ -614,6 +614,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         StreamedUtterance.trace = { Permissions.log("stream: \($0)") }
         CodexThreadNames.trace = { Permissions.log($0) }
         RightHands.trace = { Permissions.log($0) }
+        // A right-hand's brain answered a reply (24 Sep): the answer is
+        // spoken on the card, in that hand's voice, like any line the manager
+        // hands a session to say.
+        BrainTransport.answered = { sessionId, name, line in
+            Task { @MainActor in
+                guard let delegate = NSApp.delegate as? AppDelegate else { return }
+                let spoken = SpokenTextSanitizer().sanitize(
+                    String(line.prefix(1200)),
+                    allowing: SpokenTextSanitizer.speakableTerms(in: line).union(name.isEmpty ? [] : [name]))
+                Permissions.log("brain: \(name.isEmpty ? String(sessionId.prefix(8)) : name) answered, speaking it")
+                delegate.speakForManager(session: sessionId, spoken: spoken,
+                                         placard: name.isEmpty ? "ANSWER" : name.uppercased())
+            }
+        }
 
         // Self-update. Started here, after the traces, so anything it logs lands
         // in the same app.log as everything else from this launch.

@@ -12,6 +12,7 @@ func usage() -> Never {
       tbase status [--json]     counts by status, plus spool depth
       tbase targets [--json]    live sessions, with goal and waiting state under --json
       tbase brief <id> --json   a session's latest brief and its ladder (the manager's read)
+      tbase ask <id> <text>     ask a right-hand's brain (right-hands.json "ask"); prints its answer
       tbase drain               move spooled hook events into the queue
       tbase events [status]     list events (optionally filtered)
       tbase utterances [status] list utterances
@@ -167,6 +168,34 @@ do {
         print("database  \(QueueStore.databaseURL.path)")
         print("audio     \(QueueStore.audioDirectory.path)")
         print("spool     \(QueueStore.supportDirectory.appendingPathComponent("spool.jsonl").path)")
+
+    case "ask":
+        // `tbase ask <id|prefix> <text…> [--conversation <id>]`: what the user
+        // said to a right-hand with a brain (`RightHands.Hand.ask`), answered
+        // by that brain, printed as one line. The voice manager's door to
+        // Director (24 Sep); the card uses the same function in-process.
+        guard args.count > 2 else { usage() }
+        var rest = Array(args.dropFirst())
+        var conversation: String?
+        if let i = rest.firstIndex(of: "--conversation"), i + 1 < rest.count {
+            conversation = rest[i + 1]
+            rest.removeSubrange(i...(i + 1))
+        }
+        guard rest.count > 1 else { usage() }
+        let wanted = rest[0]
+        let sessionId = try store.sessionId(matching: wanted) ?? wanted
+        RightHands.publish(sessions: [], ownership: FileSessionOwnershipStore.shared.all())
+        guard let hand = RightHands.hand(for: sessionId), hand.asks else {
+            print("not a right-hand with a brain: \(wanted)")
+            exit(2)
+        }
+        switch RightHands.ask(hand, text: rest.dropFirst().joined(separator: " "),
+                              conversation: conversation ?? sessionId, session: sessionId) {
+        case .success(let line): print(line)
+        case .failure(let failure):
+            print("\(hand.name ?? "the hand") did not answer: \(failure)")
+            exit(5)
+        }
 
     case "status" where args.contains("--json"):
         // The manager's read door. Shape is `ManagerJSON.Status`, tested in Core.

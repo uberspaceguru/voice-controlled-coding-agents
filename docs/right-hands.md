@@ -120,3 +120,45 @@ microphone on.
   own scheme (`AppIdentity.urlScheme`: `tbdev` for Dev, `tranquilitybase` for
   Prod). A launcher script that sets the variable itself inside the child still
   overrides it; `~/.yobi1/tranquility-dev/run-manager.py` did on 23 Sep.
+
+## A hand with a brain (24 Sep)
+
+Director stopped being a Claude session: it is the `director` command and its
+tick. A hand can therefore carry two commands instead of a pane:
+
+```json
+{"name": "Director", "session": "87469f47-f2b2-410e-9ac5-58c6363a19f3",
+ "projects": ["director", "--json", "status"],
+ "ask": ["director", "ask", "{text}", "--channel", "tranquility", "--external-id", "{conversation}"]}
+```
+
+- `projects` is the card, run each time it opens. Its output may be the rollup
+  shape or Director's own status JSON: needs-you agents first, then working,
+  five at most, with the whole fleet counted in the first line.
+- `ask` is the brain. A reply to the card, spoken or typed, goes through
+  `BrainTransport` (the remote agents' door) instead of being typed into a
+  pane, and the answer is spoken on the card in the hand's voice. `{text}` is
+  one argv element; nothing reaches a shell. `{conversation}` is the hand's
+  session id, so card and voice are one thread in Director's `conversation`.
+- In hands-free, "Director, …" and anything said with Director on stage go to
+  `tbase ask`, and the answer is spoken through the app's `say` verb.
+- A hand with a brain stands green on the grid whether or not a process runs
+  under its id, never offers revive, and is listed by `tbase targets --json`
+  with `"asks": true`.
+
+## Why Director's hails timed out (-1712)
+
+`open -g tranquilitybase://say?...` returns -1712 (errAETimeout) when the app
+that owns the scheme does not answer the URL Apple Event in time. Director's
+`notify_log` shows hails working at 19:47 and 19:48 on 23 Sep and failing with
+-1712 on every attempt from 05:48 on 24 Sep. Prod 1307's own log stops
+recording any main-thread activity (menu bar checks, hotkeys, HUD) after 22:30
+on 23 Sep, while a background loop kept logging "secrets: read" four times
+every 1.5 s, which is also what wrote 2 GB of log a day (the 23 Sep disk-writes
+diagnostic report). The app's main thread was stuck, so it could not take the
+URL event. No spindump was captured, so the blocking call is not identified.
+
+A preview must also own the scheme while it runs: LaunchServices sends a link
+to the scheme's default app and launches it if needed, and the default for
+`tranquilitybase://` is Prod. With Prod stopped, a hail to the old scheme
+starts Prod.

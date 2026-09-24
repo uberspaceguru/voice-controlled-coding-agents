@@ -446,6 +446,15 @@ extension Coordinator {
             return try await dispatchRemote(utterance: &utterance, text: text,
                                             target: target, transport: remote)
         }
+        // A HAND WITH A BRAIN IS ASKED, NOT TYPED INTO (24 Sep). Director's
+        // card is a conversation with Director, and its answer comes back as
+        // a line to speak, not as a turn in a pane: the same door a remote
+        // agent uses, with `director ask` as its provider.
+        if let hand = hand(forSession: target.sessionId, cwd: target.cwd), hand.asks {
+            return try await dispatchRemote(
+                utterance: &utterance, text: text, target: target,
+                transport: BrainTransport(hand: hand))
+        }
         // Typing fails CLOSED: probe failure and genuine absence refuse alike,
         // because injecting into a session we cannot verify could answer a dialog.
         // A session that has JUST registered can drop back out of

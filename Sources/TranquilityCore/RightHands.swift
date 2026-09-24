@@ -43,15 +43,35 @@ public enum RightHands {
         /// running (`Rollup`). When set, the hand's card and brief show
         /// those projects instead of its last turn.
         public var rollup: String?
+        /// A command that prints the hand's projects, run each time the card
+        /// opens: `["director", "--json", "status"]`. Outranks `rollup`. Its
+        /// output is read by `Rollup.parse`, which takes either the rollup
+        /// shape or Director's own status JSON.
+        public var projects: [String]?
+        /// The hand's BRAIN: a command that answers what the user said to it,
+        /// instead of typing the words into its pane (24 Sep). `{text}` is the
+        /// words, `{conversation}` the thread they belong to, `{session}` the
+        /// hand's session id:
+        /// `["director", "ask", "{text}", "--channel", "tranquility", "--external-id", "{conversation}"]`.
+        /// Its stdout, trimmed, is the line the hand speaks back.
+        public var ask: [String]?
 
         public init(name: String? = nil, session: String? = nil, cwd: String? = nil,
-                    tmux: String? = nil, rollup: String? = nil) {
+                    tmux: String? = nil, rollup: String? = nil,
+                    projects: [String]? = nil, ask: [String]? = nil) {
             self.name = name
             self.session = session
             self.cwd = cwd
             self.tmux = tmux
             self.rollup = rollup
+            self.projects = projects
+            self.ask = ask
         }
+
+        /// Whether this hand's card is its projects rather than its last turn.
+        public var hasCard: Bool { projects?.isEmpty == false || rollup != nil }
+        /// Whether a reply to this hand is asked of its brain rather than typed.
+        public var asks: Bool { ask?.isEmpty == false }
 
         /// Whether this hand matches a session, by any of its three keys.
         public func matches(sessionId: String, cwd: String?, tmuxSessionName: String?) -> Bool {
@@ -106,11 +126,13 @@ public enum RightHands {
             var ids = Set<String>()
             var names: [String: String] = [:]
             var rollups: [String: String] = [:]
+            var byId: [String: Hand] = [:]
             // Explicit ids are hands whether or not anything is running under
             // them: a name has to resolve for a row built from disk too.
             for hand in hands {
                 guard let session = hand.session, session.count >= 32 else { continue }
                 ids.insert(session)
+                byId[session] = hand
                 if let name = hand.name { names[session] = name }
                 if let rollup = hand.rollup { rollups[session] = rollup }
             }
@@ -121,10 +143,12 @@ public enum RightHands {
                 guard let hand = hand(for: session.id, cwd: session.cwd,
                                       tmuxSessionName: tmuxById[session.id]) else { continue }
                 ids.insert(session.id)
+                byId[session.id] = hand
                 if let name = hand.name { names[session.id] = name }
                 if let rollup = hand.rollup { rollups[session.id] = rollup }
             }
-            return Resolved(ids: ids, names: names, rollups: rollups, summarizeOthers: summarizeOthers)
+            return Resolved(ids: ids, names: names, rollups: rollups,
+                            summarizeOthers: summarizeOthers, hands: byId)
         }
     }
 
@@ -135,13 +159,17 @@ public enum RightHands {
         public var names: [String: String]
         public var rollups: [String: String]
         public var summarizeOthers: Bool
+        /// The hand each resolved id belongs to.
+        public var hands: [String: Hand]
 
         public init(ids: Set<String>, names: [String: String] = [:],
-                    rollups: [String: String] = [:], summarizeOthers: Bool = false) {
+                    rollups: [String: String] = [:], summarizeOthers: Bool = false,
+                    hands: [String: Hand] = [:]) {
             self.ids = ids
             self.names = names
             self.rollups = rollups
             self.summarizeOthers = summarizeOthers
+            self.hands = hands
         }
 
         public func contains(_ sessionId: String) -> Bool { ids.contains(sessionId) }
@@ -212,9 +240,14 @@ public enum RightHands {
                     let trimmed = value.trimmingCharacters(in: .whitespaces)
                     return trimmed.isEmpty ? nil : trimmed
                 }
+                func argv(_ key: String) -> [String]? {
+                    guard let list = object[key] as? [String], !list.isEmpty else { return nil }
+                    return list
+                }
                 hands.append(Hand(name: string("name"), session: string("session"),
                                   cwd: string("cwd"), tmux: string("tmux"),
-                                  rollup: string("rollup")))
+                                  rollup: string("rollup"),
+                                  projects: argv("projects"), ask: argv("ask")))
             } else {
                 return .failure(.wrongShape("entry \(index) is neither an object nor a string"))
             }
@@ -277,6 +310,88 @@ public enum RightHands {
         return path.map { ($0 as NSString).expandingTildeInPath }
     }
 
+    /// The hand a session belongs to: the published resolution first, then
+    /// the file's explicit ids. Nil for a session that is not a hand.
+    public static func hand(for sessionId: String, roster: Roster? = RightHands.load()) -> Hand? {
+        if let hand = snapshot.read()?.hands[sessionId] { return hand }
+        return roster?.hands.first { $0.matches(sessionId: sessionId, cwd: nil, tmuxSessionName: nil) }
+    }
+
+    // MARK: - The brain
+
+    public enum AskFailure: Error, Equatable, Sendable {
+        case notABrain
+        case failed(String)
+    }
+
+    /// Fill a hand's `ask` template. Pure, for tests.
+    static func fill(_ template: [String], text: String, conversation: String, session: String) -> [String] {
+        template.map {
+            $0.replacingOccurrences(of: "{text}", with: text)
+                .replacingOccurrences(of: "{conversation}", with: conversation)
+                .replacingOccurrences(of: "{session}", with: session)
+        }
+    }
+
+    /// Ask a hand's brain and return the line it answered with.
+    ///
+    /// The command is run directly, never through a shell: the words are one
+    /// argv element whatever they contain. A bare program name is found on
+    /// the user's own directories as well as PATH, because an app launched
+    /// from the Dock has a PATH of four system directories and `director`
+    /// lives in `~/.local/bin`. `run` is the seam.
+    public static func ask(_ hand: Hand, text: String, conversation: String, session: String,
+                           timeout: TimeInterval = 60,
+                           run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
+                               Subprocess.run($0, $1, timeout: $2)
+                           }) -> Result<String, AskFailure> {
+        guard let template = hand.ask, !template.isEmpty else { return .failure(.notABrain) }
+        let argv = fill(template, text: text, conversation: conversation, session: session)
+        guard let program = executable(argv[0]) else {
+            return .failure(.failed("\(argv[0]) is not on this Mac"))
+        }
+        switch run(program, Array(argv.dropFirst()), timeout) {
+        case .success(let out):
+            let line = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            return line.isEmpty ? .failure(.failed("\(argv[0]) answered nothing")) : .success(line)
+        case .failure(let error):
+            return .failure(.failed(error.message.isEmpty ? "\(argv[0]) failed" : error.message))
+        }
+    }
+
+    /// Run a hand's `projects` command and read the card from what it prints.
+    public static func projects(_ hand: Hand, timeout: TimeInterval = 20,
+                                run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
+                                    Subprocess.run($0, $1, timeout: $2)
+                                }) -> Rollup? {
+        guard let argv = hand.projects, !argv.isEmpty, let program = executable(argv[0]) else { return nil }
+        guard case .success(let out) = run(program, Array(argv.dropFirst()), timeout) else {
+            trace?("right-hands: \(argv.joined(separator: " ")) failed; the card falls back")
+            return nil
+        }
+        return Rollup.parse(Data(out.utf8))
+    }
+
+    /// The card for a hand: its `projects` command, else its rollup file.
+    public static func card(for hand: Hand) -> Rollup? {
+        if hand.projects?.isEmpty == false, let rollup = projects(hand) { return rollup }
+        guard let path = hand.rollup else { return nil }
+        return Rollup.load(path: (path as NSString).expandingTildeInPath)
+    }
+
+    /// An absolute path for a program named in a template.
+    static func executable(_ name: String) -> String? {
+        let fm = FileManager.default
+        if name.contains("/") {
+            let path = (name as NSString).expandingTildeInPath
+            return fm.isExecutableFile(atPath: path) ? path : nil
+        }
+        let home = fm.homeDirectoryForCurrentUser.path
+        let dirs = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            + ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        return dirs.map { "\($0)/\(name)" }.first { fm.isExecutableFile(atPath: $0) }
+    }
+
     // MARK: - The rollup
 
     /// What a director's card shows instead of its last turn: at most five
@@ -336,10 +451,14 @@ public enum RightHands {
 
         public var projects: [Project]
         public var updatedAt: String?
+        /// A whole-fleet count to say instead of counting the projects shown,
+        /// when the source knows more than five things.
+        public var totals: String?
 
-        public init(projects: [Project], updatedAt: String? = nil) {
+        public init(projects: [Project], updatedAt: String? = nil, totals: String? = nil) {
             self.projects = projects
             self.updatedAt = updatedAt
+            self.totals = totals
         }
 
         public static func load(path: String) -> Rollup? {
@@ -351,8 +470,11 @@ public enum RightHands {
         /// is not a rollup at all; an empty project list is a rollup that
         /// says "nothing to report", which is an answer.
         public static func parse(_ data: Data) -> Rollup? {
-            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let raw = object["projects"] as? [[String: Any]] else { return nil }
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            if object["projects"] == nil, let groups = object["groups"] as? [String: Any] {
+                return fromDirectorStatus(groups)
+            }
+            guard let raw = object["projects"] as? [[String: Any]] else { return nil }
             let projects = raw.compactMap { entry -> Project? in
                 guard let name = (entry["name"] as? String)?.trimmingCharacters(in: .whitespaces),
                       !name.isEmpty else { return nil }
@@ -367,6 +489,64 @@ public enum RightHands {
                           updatedAt: object["updatedAt"] as? String)
         }
 
+        /// Director's `--json status` read as a card (24 Sep): the agents
+        /// waiting on the user first, then the ones working, five at most.
+        /// Each line is the agent's own question, else its worker note, else
+        /// the first reason Director gave; `totals` is the whole fleet, so the
+        /// card says "10 need you" even when it shows three of them.
+        static func fromDirectorStatus(_ groups: [String: Any]) -> Rollup {
+            func rows(_ key: String) -> [[String: Any]] { groups[key] as? [[String: Any]] ?? [] }
+            func line(_ a: [String: Any]) -> String {
+                for key in ["pending_question", "question", "worker_note", "block_detail"] {
+                    if let v = a[key] as? String {
+                        let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !t.isEmpty { return clip(t) }
+                    }
+                }
+                if let last = a["last_message"] as? String,
+                   !last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return clip(last) }
+                // Director's own reasons, but not its judge's bookkeeping:
+                // "Jev: waiting on Ahmed (ahmed_decision, 100%)" says nothing a
+                // needs-you lamp has not already said.
+                if let reasons = a["reasons"] as? [String],
+                   let first = reasons.first(where: { !$0.hasPrefix("Jev:") }) { return clip(first) }
+                return ""
+            }
+            func name(_ a: [String: Any]) -> String? {
+                for key in ["name", "claude_name", "project"] {
+                    if let v = a[key] as? String, !v.isEmpty { return v }
+                }
+                return nil
+            }
+            var projects: [Project] = []
+            for (key, state) in [("needs_you", State.needsYou), ("working", State.moving)] {
+                for a in rows(key) {
+                    guard let n = name(a) else { continue }
+                    projects.append(Project(name: n, state: state, line: line(a)))
+                }
+            }
+            var parts: [String] = []
+            for (key, word) in [("needs_you", "need you"), ("working", "working"),
+                                ("stuck", "stuck"), ("idle", "idle")] {
+                let n = rows(key).count
+                if n > 0 { parts.append("\(n) \(key == "needs_you" && n == 1 ? "needs you" : word)") }
+            }
+            return Rollup(projects: Array(projects.prefix(limit)),
+                          totals: parts.isEmpty ? nil : parts.joined(separator: ", ") + ".")
+        }
+
+        /// One sentence, at most about twenty words: a worker note can be a
+        /// paragraph, and the card is for a glance.
+        static func clip(_ text: String, words: Int = 20) -> String {
+            // A command or a path in backticks is for reading, not hearing.
+            let flat = text.replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "`[^`]*`", with: "a command", options: .regularExpression)
+                .replacingOccurrences(of: "*", with: "")
+            let first = flat.split(separator: ".", maxSplits: 1).first.map(String.init) ?? flat
+            let cut = first.split(separator: " ").prefix(words).joined(separator: " ")
+            return cut.count < first.count ? cut + "…" : cut
+        }
+
         /// The card and the spoken line, built from the projects. `topic` is
         /// the hand's name, so the ear hears who is talking first, as with
         /// every other brief.
@@ -374,7 +554,9 @@ public enum RightHands {
             let counts = Dictionary(grouping: projects, by: \.state).mapValues(\.count)
             func count(_ state: State) -> Int { counts[state] ?? 0 }
             let happened: String
-            if projects.isEmpty {
+            if let totals {
+                happened = totals
+            } else if projects.isEmpty {
                 happened = "No projects to report."
             } else {
                 var parts: [String] = []
@@ -415,6 +597,7 @@ public enum RightHands {
 
     /// The rollup for a session, if it is a hand with one and the file reads.
     public static func rollup(for sessionId: String) -> Rollup? {
+        if let hand = hand(for: sessionId), hand.hasCard { return card(for: hand) }
         guard let path = rollupPath(for: sessionId) else { return nil }
         return Rollup.load(path: path)
     }

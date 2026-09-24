@@ -212,7 +212,10 @@ extension AppDelegate {
             remote: remoteAgents(waiting: (try? coordinator.waiting()) ?? []),
             // nil is "could not read the registry"; [] is "nobody is home".
             livenessKnown: probe != nil,
-            rightHands: hands?.ids))
+            rightHands: hands?.ids,
+            brains: (hands?.hands ?? [:]).reduce(into: [String: String]()) { out, pair in
+                if pair.value.asks { out[pair.key] = pair.value.name ?? "Director" }
+            }))
 
         // Recorded before anything is drawn so the card can ask the same
         // question the rows answered, and get the same answer.

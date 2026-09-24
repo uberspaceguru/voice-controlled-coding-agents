@@ -94,6 +94,12 @@ public extension GridAssembler {
         /// the user has not said. Nil is the panel as it always was. A set —
         /// even an empty one — files every row outside it, whatever its lamp.
         public var rightHands: Set<String>?
+        /// Right-hands with a brain (`RightHands.Hand.ask`), by id, with their
+        /// names. Such a hand is not a process: Director is a command-line
+        /// tool and a tick (24 Sep), so it has no pane to be alive in. Its row
+        /// stands green — ready to be talked to — whether or not any session
+        /// is running under its id, and a tap opens its card.
+        public var brains: [String: String]
 
         /// What the poller last saw, in the shape the bands need.
         public struct RemoteAgents {
@@ -142,7 +148,8 @@ public extension GridAssembler {
             recordedTurns: Set<String>,
             remote: RemoteAgents = RemoteAgents(),
             livenessKnown: Bool = true,
-            rightHands: Set<String>? = nil
+            rightHands: Set<String>? = nil,
+            brains: [String: String] = [:]
         ) {
             self.waiting = waiting
             self.known = known
@@ -161,6 +168,7 @@ public extension GridAssembler {
             self.recordedTurns = recordedTurns
             self.remote = remote
             self.rightHands = rightHands
+            self.brains = brains
         }
     }
 
@@ -585,6 +593,29 @@ public extension GridAssembler {
                 // band is enumerated last, so without a timestamp it could
                 // never join the order however recently the agent spoke.
                 lastActivity: agent.updatedAt))
+        }
+
+        // A BRAIN STANDS READY (24 Sep). A right-hand answered by a command
+        // rather than a pane is always there to be talked to, so its row is
+        // green, never unlit and never "revive": reviving would start a Claude
+        // session in Director's directory, which is not Director. A brain with
+        // no row in any band gets one, so the card is always one tap away.
+        if !input.brains.isEmpty {
+            rows = rows.map { row in
+                guard let name = input.brains[row.id] else { return row }
+                return SessionRow(id: row.id, name: name, aux: "ask me", lamp: .ready,
+                                  revivable: false, read: row.read == .unread ? .unread : .opened,
+                                  detail: "Talk to \(name): its card is its projects, and what you say is answered.",
+                                  harness: row.harness, door: row.door, hasRecordedTurn: true,
+                                  lastActivity: row.lastActivity)
+            }
+            let drawn = Set(rows.map(\.id))
+            for (id, name) in input.brains.sorted(by: { $0.key < $1.key }) where !drawn.contains(id) {
+                rows.append(SessionRow(id: id, name: name, aux: "ask me", lamp: .ready,
+                                       read: .opened,
+                                       detail: "Talk to \(name): its card is its projects, and what you say is answered.",
+                                       hasRecordedTurn: true))
+            }
         }
 
         // The right-hands, before the switch (23 Sep). A row that is not a

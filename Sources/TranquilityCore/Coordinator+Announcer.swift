@@ -132,17 +132,23 @@ extension Coordinator {
     /// roster against the session's own directory and the ownership records,
     /// so a test can hand in a roster and a file of its own. Nil for a
     /// session that is not a hand, or with no roster at all.
-    func hand(for event: WaitingSession) -> (name: String?, rollup: String?)? {
-        guard let roster = rightHands() else { return nil }
-        let resolved = roster.resolve(sessions: [(id: event.sessionId, cwd: event.cwd)],
-                                      ownership: ownership.all())
-        guard resolved.contains(event.sessionId) else { return nil }
-        return (resolved.names[event.sessionId],
-                resolved.rollups[event.sessionId].map { ($0 as NSString).expandingTildeInPath })
+    func hand(for event: WaitingSession) -> RightHands.Hand? {
+        hand(forSession: event.sessionId, cwd: event.cwd)
     }
 
-    /// Where a session's rollup lives, or nil.
-    func rollupPath(for event: WaitingSession) -> String? { hand(for: event)?.rollup }
+    func hand(forSession sessionId: String, cwd: String?) -> RightHands.Hand? {
+        guard let roster = rightHands() else { return nil }
+        let resolved = roster.resolve(sessions: [(id: sessionId, cwd: cwd)],
+                                      ownership: ownership.all())
+        return resolved.hands[sessionId]
+    }
+
+    /// Whether a session's card is its projects: a `projects` command or a
+    /// rollup file. Named for the older of the two, which it began as.
+    func rollupPath(for event: WaitingSession) -> String? {
+        guard let hand = hand(for: event), hand.hasCard else { return nil }
+        return hand.projects?.joined(separator: " ") ?? hand.rollup.map { ($0 as NSString).expandingTildeInPath }
+    }
 
     /// What ⌃⌥ plays when nothing is unopened: the next waiting row AFTER the
     /// one you just heard, wrapping at the end. Anything green always plays
@@ -336,7 +342,14 @@ extension Coordinator {
             // the ordering nor the unheard filter applies. "Read me this session's
             // last summary" stays answerable after you have heard it, dismissed it,
             // or typed since; the strictness belongs to the automatic path only.
+            //
+            // A hand whose card is its projects has a card with no turn behind
+            // it (24 Sep: Director is a command, and may never have stopped
+            // under this id); it is read from a stand-in row.
             candidate = try store.latestStop(for: sessionId)
+                ?? (hand(forSession: sessionId, cwd: nil)?.hasCard == true
+                    ? WaitingSession(sessionId: sessionId, latestId: 0, createdAtMs: 0, hookEvent: .stop)
+                    : nil)
         } else {
             // The automatic path, and the one the bug was on: only here does the
             // delivery overlay apply. An explicitly named session (above) is a
@@ -438,9 +451,9 @@ extension Coordinator {
 
     /// The rollup composed as a `Summary`, or nil for a session without one.
     func rollupSummary(for event: WaitingSession) -> Summary? {
-        guard let hand = hand(for: event), let path = hand.rollup else { return nil }
-        guard let rollup = RightHands.Rollup.load(path: path) else {
-            Coordinator.trace?("rollup for \(event.sessionId.prefix(8)) at \(path) is unreadable; summarising the turn instead")
+        guard let hand = hand(for: event), hand.hasCard else { return nil }
+        guard let rollup = RightHands.card(for: hand) else {
+            Coordinator.trace?("card for \(event.sessionId.prefix(8)) is unreadable; summarising the turn instead")
             return nil
         }
         let topic = hand.name ?? GridAssembler.pinnedNames(event.sessionId) ?? event.projectLabel
