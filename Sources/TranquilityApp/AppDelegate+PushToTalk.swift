@@ -759,6 +759,14 @@ extension AppDelegate {
                             name,
                             announcement.event.cwd)
                         self.lastAnnouncement = announcement
+                        // Opening a director's card is opening a conversation
+                        // (23 Sep): the hand goes on the manager's stage, so
+                        // what you say next is a question about its projects
+                        // or an instruction typed into it. A pick only, never
+                        // ⌃⌥ — the automatic path must not turn a microphone on.
+                        if eventId != nil, RightHands.rollupPath(for: announcement.event.sessionId) != nil {
+                            self.stageForManager(session: announcement.event.sessionId, name: name)
+                        }
                         return true
                     },
                     onWord: { [weak self] range in

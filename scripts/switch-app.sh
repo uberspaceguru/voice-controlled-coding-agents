@@ -117,7 +117,24 @@ trap cleanup EXIT
 # Refuse a target older than the schema already on disk. Before a newer target
 # advances it, take a transactionally consistent backup so an intentional
 # rollback has a real recovery point rather than a copied WAL fragment.
-TARGET_SCHEMA=$(read_target TBDatabaseSchemaVersion 2>/dev/null || echo 18)
+#
+# The stamp is what the BUNDLE says it migrates to. bundle.sh reads it from
+# the source's migrations since 23 Sep (scripts/lib/schema-version.sh); a
+# bundle built before that says 18 whatever its source did, and a Prod build
+# of upstream, whose plist may carry no key at all, is read as its published
+# source's version rather than 18 — so a database the running app itself
+# advanced does not lock the user out of the lane they are already on.
+TARGET_SCHEMA=$(read_target TBDatabaseSchemaVersion 2>/dev/null || true)
+if [ -z "$TARGET_SCHEMA" ]; then
+  # No stamp. The bundle's source commit is the next best witness: if this
+  # checkout has it, ask its migrations; otherwise the old constant.
+  . "$(dirname "$0")/lib/schema-version.sh"
+  if git cat-file -e "$TARGET_SHA:Sources/TranquilityCore/QueueStore.swift" 2>/dev/null; then
+    TARGET_SCHEMA=$(git show "$TARGET_SHA:Sources/TranquilityCore/QueueStore.swift" \
+      | grep -oE 'registerMigration\("v[0-9]+' | grep -oE '[0-9]+$' | sort -n | tail -1 || true)
+  fi
+  TARGET_SCHEMA="${TARGET_SCHEMA:-18}"
+fi
 CURRENT_SCHEMA=0
 if [ -f "$DB" ]; then
   CURRENT_SCHEMA=$(sqlite3 "$DB" "select identifier from grdb_migrations;" 2>/dev/null \

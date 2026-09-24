@@ -90,6 +90,10 @@ public extension GridAssembler {
         /// choice, not a property of the agent, and location does not belong in
         /// the type system.
         public var remote: RemoteAgents
+        /// The sessions the panel is for, resolved (`RightHands`), or nil when
+        /// the user has not said. Nil is the panel as it always was. A set —
+        /// even an empty one — files every row outside it, whatever its lamp.
+        public var rightHands: Set<String>?
 
         /// What the poller last saw, in the shape the bands need.
         public struct RemoteAgents {
@@ -137,7 +141,8 @@ public extension GridAssembler {
             closedCallsigns: [String: String] = [:],
             recordedTurns: Set<String>,
             remote: RemoteAgents = RemoteAgents(),
-            livenessKnown: Bool = true
+            livenessKnown: Bool = true,
+            rightHands: Set<String>? = nil
         ) {
             self.waiting = waiting
             self.known = known
@@ -155,6 +160,7 @@ public extension GridAssembler {
             self.closedCallsigns = closedCallsigns
             self.recordedTurns = recordedTurns
             self.remote = remote
+            self.rightHands = rightHands
         }
     }
 
@@ -579,6 +585,27 @@ public extension GridAssembler {
                 // band is enumerated last, so without a timestamp it could
                 // never join the order however recently the agent spoke.
                 lastActivity: agent.updatedAt))
+        }
+
+        // The right-hands, before the switch (23 Sep). A row that is not a
+        // hand is filed, whatever its lamp, and WITHOUT the "a waiting turn
+        // turns the lamp back on" exception: that exception is the switch's
+        // whole policy and this is not the switch. The user did not file the
+        // session as it was; they said the panel is not for it. Filing rather
+        // than dropping keeps it one page away — the list is where you dive
+        // deeper — and hands `arrivalKeys` a row with no green lamp, so it
+        // neither chimes nor counts. Nothing is written for these: no
+        // `clearSwitches`, so a filed hand-less row is never un-filed by the
+        // loop below.
+        //
+        // Dead rows are left alone: `switchedOffCopy()` says ALIVE by
+        // construction (`quietRowsLast`), and an unlit row is already on the
+        // list by its lamp.
+        if let hands = input.rightHands {
+            rows = rows.map { row in
+                guard row.lamp != .unlit, !hands.contains(row.id) else { return row }
+                return row.switchedOffCopy()
+            }
         }
 
         // The user's own switch, applied last and to every band at once.

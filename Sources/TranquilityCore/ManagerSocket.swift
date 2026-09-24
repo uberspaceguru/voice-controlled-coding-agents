@@ -269,6 +269,13 @@ public final class ManagerSocket: ManagerTransport, @unchecked Sendable {
         task.send(.string(text)) { _ in }
     }
 
+    /// A command line down to the bot, beside the replies: `{"cmd": "stage",
+    /// "session": …, "name": …}` puts a session on the manager's stage
+    /// (23 Sep). The bot reads the `cmd` key in its serializer.
+    public func send(command: [String: Any]) {
+        sendText(command)
+    }
+
     // MARK: - down
 
     private func receiveLoop(_ task: URLSessionWebSocketTask) async {

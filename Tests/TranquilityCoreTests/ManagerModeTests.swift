@@ -50,4 +50,24 @@ final class ManagerModeTests: XCTestCase {
         XCTAssertTrue(env["PATH"]?.hasSuffix(":/x") ?? false)
         XCTAssertTrue(env["PATH"]?.contains("/.local/bin") ?? false)
     }
+
+    /// The child's links reach the lane that started it (23 Sep): the
+    /// scheme is handed over, and it beats one inherited from the user's
+    /// shell, which is how a `tbdev` link once went looking for a Dev app
+    /// that was not running while Prod was.
+    func testEnvironmentHandsTheChildThisLanesScheme() {
+        let env = ManagerConfig.environment(base: ["TB_URL_SCHEME": "tbdev"], scheme: "tranquilitybase")
+        XCTAssertEqual(env["TB_URL_SCHEME"], "tranquilitybase")
+        XCTAssertEqual(ManagerConfig.environment(base: [:], scheme: "tbdev")["TB_URL_SCHEME"], "tbdev")
+    }
+
+    func testThePreferredSchemeIsTheLanesOwn() {
+        let dev = ["tranquilitybase", "voicedispatch", "tbdev"]
+        XCTAssertEqual(AppIdentity.preferredScheme(among: dev, channel: .development), "tbdev")
+        XCTAssertEqual(AppIdentity.preferredScheme(among: dev, channel: .production), "tranquilitybase",
+                       "a Prod build that happens to claim tbdev still writes its own name")
+        XCTAssertEqual(AppIdentity.preferredScheme(among: ["tranquilitybase", "voicedispatch"], channel: .development),
+                       "tranquilitybase", "a Dev bundle without tbdev falls back to the shared scheme")
+        XCTAssertEqual(AppIdentity.preferredScheme(among: [], channel: .test), "tranquilitybase")
+    }
 }

@@ -37,6 +37,7 @@ from vocab import Intent, Line, LineKind, Role, line_from_transcript, parse_inte
 from turns import TurnQueue
 from spoken import spoken
 from tools import _json_or_text, _run
+from vocative import names_an_agent
 
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 NAME = os.getenv("TB_MANAGER_NAME", "Tranquility")
@@ -103,6 +104,19 @@ def names_the_manager(text: str) -> bool:
     if not words or not words[0].startswith(NAME_SOUNDS):
         return False
     return len(words) < 2 or words[1] != "base"
+
+
+# How long one `tbase targets` read serves the per-turn vocative check.
+TARGETS_TTL_SECS = float(os.getenv("TB_TARGETS_TTL_SECS", "10"))
+
+
+def _right_hands_only(rows: list[dict]) -> list[dict]:
+    """The user's right-hands, when they have named any (`rightHand` on every
+    row); everyone, when the key is absent. The grid makes the same cut, so
+    "what's next" and the panel agree about who exists."""
+    if not any("rightHand" in r for r in rows if isinstance(r, dict)):
+        return rows
+    return [r for r in rows if r.get("rightHand")]
 
 
 # Intents that are commands only the manager can carry out. Thinking aloud does
@@ -447,6 +461,11 @@ class Manager(FrameProcessor):
         # Every turn, in the order said, decided one at a time (turns.py, hf-13).
         self._turns = TurnQueue(self._dispatch)
         self._turns_task: asyncio.Task | None = None
+        # The fleet as of a moment ago, for the vocative check that runs on
+        # EVERY turn: a `tbase targets` per sentence would put a subprocess in
+        # front of every verdict. Refreshed when older than TARGETS_TTL_SECS.
+        self._targets_cache: tuple[float, list[dict]] = (0.0, [])
+        self._commands_task = None  # drains the app's `cmd` lines (session.commands)
 
     async def _say_and_wait(self, text: str, timeout: float = 8.0):
         await self._say(text)  # _say already waits for its own voice to stop
@@ -487,7 +506,7 @@ class Manager(FrameProcessor):
             return
 
     async def cleanup(self):
-        for name in ("_wire_task", "_idle_task"):
+        for name in ("_wire_task", "_idle_task", "_commands_task"):
             task = getattr(self, name)
             if task:
                 await self.cancel_task(task)
@@ -511,6 +530,8 @@ class Manager(FrameProcessor):
                 self._wire_task = self.create_task(self._drain_wire())
                 self._last_heard = time.monotonic()
                 self._idle_task = self.create_task(self._end_when_idle())
+            if self._commands_task is None:
+                self._commands_task = self.create_task(self._drain_commands())
             # The pipeline is running and the mic is open: now it is listening.
             # Both: main's build stamp on the ready line, and the data
             # channel's replies.
@@ -612,6 +633,16 @@ class Manager(FrameProcessor):
             await emit(self, "error", reason=str(e)[:160])
 
     async def _turn(self, text, frame, direction):
+        # A turn that opens with an agent's name is for that agent, and no
+        # model is asked whether the manager was addressed: "Director, ship
+        # the fix" is the same shape as "Tranquility, tell Director to ship
+        # the fix" with the manager taken out of the sentence (23 Sep). The
+        # named agent takes the stage; the rest of the words are the message,
+        # or, with nothing after the name, the message is dictated next.
+        named = names_an_agent(text, [t.get("name") or "" for t in await self._targets_cached()])
+        if named:
+            await self._address_agent(text, *named)
+            return
         t0 = time.monotonic()
         p, intent_answer = await self._jev.turn(text, self._recent, self.stage)
         ms = int((time.monotonic() - t0) * 1000)
@@ -1064,12 +1095,86 @@ class Manager(FrameProcessor):
     async def _targets(self) -> list[dict]:
         code, out = await _run(TBASE, "targets", "--json")
         data = _json_or_text(code, out).get("data")
-        return data if isinstance(data, list) else []
+        rows = _right_hands_only(data if isinstance(data, list) else [])
+        self._targets_cache = (time.monotonic(), rows)
+        return rows
+
+    async def _targets_cached(self) -> list[dict]:
+        """`_targets`, no more often than TARGETS_TTL_SECS. For the checks that
+        run on every turn; a door that acts reads the fresh list."""
+        at, rows = self._targets_cache
+        if rows and time.monotonic() - at < TARGETS_TTL_SECS:
+            return rows
+        try:
+            return await self._targets()
+        except Exception as e:  # noqa: BLE001 — a failed read must not cost the turn
+            logger.warning(f"targets unavailable: {e}")
+            return rows
 
     async def _waiting(self) -> list[dict]:
         code, out = await _run(TBASE, "status", "--json")
         data = _json_or_text(code, out).get("data") or {}
-        return data.get("waiting", []) if isinstance(data, dict) else []
+        return _right_hands_only(data.get("waiting", []) if isinstance(data, dict) else [])
+
+    # -- the app's commands, and a named agent -------------------------------------
+
+    async def _drain_commands(self):
+        """Lines the app sends down (`{"cmd": "stage", ...}`), from stdin when
+        local and from the socket when hosted; see session.commands."""
+        q = session.current().commands
+        while True:
+            cmd = await q.get()
+            try:
+                if cmd.get("cmd") == "stage" and cmd.get("session"):
+                    await self._stage_from_app(cmd["session"], cmd.get("name") or "")
+                else:
+                    logger.info(f"command ignored: {cmd}")
+            except Exception as e:  # noqa: BLE001
+                logger.exception(f"command failed: {e}")
+
+    async def _stage_from_app(self, session_id: str, name: str):
+        """The user opened a right-hand's card: it is on stage, and the manager
+        says so once, so the next thing said is about it or for it."""
+        live = {t["sessionId"]: t for t in await self._targets()}
+        target = live.get(session_id) or next(
+            (t for sid, t in live.items() if sid.startswith(session_id[:8])), None)
+        if not target:
+            target = {"sessionId": session_id, "name": name or session_id[:8], "project": "", "goal": ""}
+        self.stage = target
+        who = target.get("name") or name or "the agent"
+        await emit(self, "stage", session=target["sessionId"], goal=target.get("goal"),
+                   name=who, project=target.get("project"))
+        note("Tranquility", f"({who} is on stage)", "acted")
+        await self._say(f"{who} is on stage. Ask about any project, or tell it what to do.")
+
+    async def _address_agent(self, text: str, name: str, rest: str):
+        """'Director, …': the named agent takes the stage and gets the words."""
+        live = await self._targets()
+        target = next((t for t in live if (t.get("name") or "") == name), None)
+        if not target:
+            await self._say(f"I can't find {name} right now.")
+            return
+        self.heard += 1
+        self.addressed += 1
+        note("you", text, "acted")
+        await emit(self, "addressed", p=1.0, intent="send_message", ms=0, text=text[:120], rule="named agent")
+        self.stage = target
+        await emit(self, "stage", session=target["sessionId"], goal=target.get("goal"),
+                   name=target.get("name"), project=target.get("project"))
+        if len(rest.split()) < 2:
+            # Only the name: open a message to it and take dictation.
+            await self._open({"kind": "agent", "sessionId": target["sessionId"], "name": name})
+            return
+        await self._earcon("listening")
+        try:
+            message = await self._brain.compose_message(rest, exchange_lines(6))
+        except Exception as e:  # noqa: BLE001 — the words themselves are a fine message
+            logger.warning(f"compose failed, sending the words as heard: {e}")
+            message = ""
+        message = message.strip() or rest
+        await emit(self, "speaking", voice="manager", text=f"message: {message[:160]}")
+        note("Tranquility", f"(typing into {name}) {message}", "acted")
+        await self._send(target["sessionId"], message)
 
     async def _brief(self, session_id: str) -> dict | None:
         code, out = await _run(TBASE, "brief", session_id, "--json")

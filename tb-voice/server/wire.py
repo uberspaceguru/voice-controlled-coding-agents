@@ -207,6 +207,13 @@ def take_reply(obj: dict, wire: "Wire | None" = None) -> bool:
     if fut is not None and not fut.done():
         fut.set_result(obj)
         return True
+    if obj.get("cmd"):
+        # A command from the app (`stage`, …), on either transport: the
+        # Manager drains these from the session's queue (manager.py
+        # `_drain_commands`).
+        import session
+        session.current().commands.put_nowait(obj)
+        return True
     return False
 
 

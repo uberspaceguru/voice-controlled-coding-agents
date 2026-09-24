@@ -10,6 +10,7 @@ been another person's. So the state lives on a Session, bound per session the
 way wire.Wire is, and every task the pipeline starts inherits it.
 """
 
+import asyncio
 import contextvars
 import os
 from dataclasses import dataclass, field
@@ -39,6 +40,11 @@ class Session:
     # The Notes agent this session types into. Hosted, a file for this lived in
     # the shared container and outlived the account that created it.
     notes_sid: str | None = None
+    # Commands the app sends DOWN to the manager: `{"cmd": "stage", ...}` on
+    # the child's stdin (local) or as a text frame (hosted). The Manager
+    # drains this; the readers only fill it. Per session, like everything
+    # else here, so a stage asked for by one session is never another's.
+    commands: "asyncio.Queue" = field(default_factory=lambda: asyncio.Queue())
 
 
 _current: contextvars.ContextVar[Session | None] = contextvars.ContextVar("tb_session", default=None)

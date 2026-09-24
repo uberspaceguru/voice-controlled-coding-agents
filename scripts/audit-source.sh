@@ -94,6 +94,14 @@ scripts/test-attribution.sh
 
 scripts/test-notary-log-parser.sh
 
+# The bundle's schema stamp follows the source's migrations. A constant here
+# refused both lanes on 23 Sep (18 stamped, v22 on disk).
+scripts/test-schema-version.sh
+
+# The agent vocative ("Director, …") routes by name, without the pipeline.
+echo "→ manager vocative"
+python3 tb-voice/server/drills/vocative_drill.py
+
 # The release's last line, which is where 0.3.1053 died with a signed,
 # notarized, stapled, fully audited DMG beside it. Every check between here and
 # there passed; the one that failed was a retry loop that could not retry.

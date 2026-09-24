@@ -185,6 +185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var managerPeer: ManagerPeer?
     var managerTask: Task<Void, Never>?
     var managerLastLine = "listening"
+    /// A right-hand whose card was opened before the manager was ready to take
+    /// it on stage (23 Sep): handed over on the child's `ready` line.
+    var pendingStage: (session: String, name: String)?
     /// Hosted: how many times in a row the socket ended without anyone asking.
     var managerReconnects = 0
     /// Hosted: the bot ended the session itself (an `idle` line); do not reconnect.
@@ -246,6 +249,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// in the log to see it by — three separate investigations reasoned about
     /// bands while the input was never checked.
     var lastCodexNameCount = -1
+    /// How many right-hands the last repaint resolved; -1 is "no roster". Logged
+    /// on change only, like the Codex count above it.
+    var lastRightHandCount = -2
     /// Which harness each session runs, rebuilt every repaint from the live
     /// map and the rows. One map, so the card and the grid cannot disagree.
     var harnessById: [String: String] = [:]
@@ -607,6 +613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AssemblyAIFileRecovery.trace = { Permissions.log("assemblyai-file: \($0)") }
         StreamedUtterance.trace = { Permissions.log("stream: \($0)") }
         CodexThreadNames.trace = { Permissions.log($0) }
+        RightHands.trace = { Permissions.log($0) }
 
         // Self-update. Started here, after the traces, so anything it logs lands
         // in the same app.log as everything else from this launch.

@@ -205,7 +205,7 @@ public enum GridAssembler {
     public static func tabDisplayName(discovered title: String?, sessionId: String,
                                       callsign: String?, cwd: String?) -> String {
         SessionRow.displayName(
-            liveName: title ?? harnessName(sessionId),
+            liveName: pinnedNames(sessionId) ?? title ?? harnessName(sessionId),
             callsign: callsign,
             fallback: cwd.map { ($0 as NSString).lastPathComponent } ?? "session")
     }
@@ -220,7 +220,20 @@ public enum GridAssembler {
     /// same Codex session differently for five days.
     public static func harnessTitle(sessionId: String, transcriptPath: String?,
                                     live: LiveSession?) -> String? {
-        tabTitle(transcriptPath: transcriptPath, live: live) ?? harnessName(sessionId)
+        // The user's own name outranks the harness's (23 Sep, `RightHands`):
+        // a title like "Multi-agent tmux coordinator" is what the model
+        // called the conversation, and "Director" is what the user calls the
+        // agent. Looked up here, at the one chokepoint, for the reason given
+        // above: a name resolved at nine call sites is a name forgotten at
+        // one of them.
+        pinnedNames(sessionId)
+            ?? tabTitle(transcriptPath: transcriptPath, live: live)
+            ?? harnessName(sessionId)
+    }
+
+    /// The seam for the pinned name, for tests and for nothing else.
+    public nonisolated(unsafe) static var pinnedNames: @Sendable (String) -> String? = {
+        RightHands.pinnedName(for: $0)
     }
 
     /// What the harness itself calls this session, for a harness that keeps a

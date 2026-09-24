@@ -170,6 +170,12 @@ do {
 
     case "status" where args.contains("--json"):
         // The manager's read door. Shape is `ManagerJSON.Status`, tested in Core.
+        // The right-hands are resolved against the waiting rows and the
+        // ownership records first, so `rightHand` and the pinned names are
+        // answered in this process, which has no tick to answer them for it.
+        let open = try store.waitingSessions()
+        RightHands.publish(sessions: open.map { (id: $0.sessionId, cwd: $0.cwd) },
+                           ownership: FileSessionOwnershipStore.shared.all())
         print(ManagerJSON.encode(try ManagerJSON.status(store: store)))
 
     case "brief":
@@ -179,6 +185,7 @@ do {
         guard args.count > 1 else { usage() }
         let wanted = args[1]
         let resolved = try store.sessionId(matching: wanted) ?? wanted
+        RightHands.publish(sessions: [], ownership: FileSessionOwnershipStore.shared.all())
         guard let brief = try ManagerJSON.brief(store: store, sessionId: resolved) else {
             print(args.contains("--json") ? "null" : "no brief stored for \(wanted)")
             exit(2)
@@ -1249,6 +1256,10 @@ case "reconcile":
         // Codex has no probe to fail — its half of this list is whatever
         // `ownership` currently verifies as alive, unconditionally.
         let live = claudeLive + FileSessionOwnershipStore.shared.liveNonRegistrySessions()
+        // Resolve the right-hands against this very list, so the names and
+        // the `rightHand` flag the manager reads are the grid's own.
+        RightHands.publish(sessions: live.map { (id: $0.sessionId, cwd: $0.cwd) },
+                           ownership: FileSessionOwnershipStore.shared.all())
         if args.contains("--json") {
             print(ManagerJSON.encode(ManagerJSON.targets(
                 store: store, live: live,

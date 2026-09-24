@@ -26,6 +26,12 @@ public enum ManagerJSON {
         public var goal: String?
         public var topic: String?
         public var waiting: Bool
+        /// Whether this session is one of the user's right-hands
+        /// (`RightHands`). ABSENT when there is no roster — the manager reads
+        /// "no key" as "everyone", exactly as the grid does — and present on
+        /// every row when there is one, so the manager can keep the hands
+        /// and drop the rest without a second read.
+        public var rightHand: Bool?
     }
 
     public struct WaitingRow: Codable, Equatable, Sendable {
@@ -36,6 +42,8 @@ public enum ManagerJSON {
         public var goal: String?
         public var eventId: Int64
         public var heard: Bool
+        /// As on `Target`.
+        public var rightHand: Bool?
     }
 
     public struct Status: Codable, Equatable, Sendable {
@@ -70,7 +78,8 @@ public enum ManagerJSON {
 
     public static func targets(
         store: QueueStore, live: [LiveSession],
-        isEnrolled: (String, String?) -> Bool
+        isEnrolled: (String, String?) -> Bool,
+        rightHands: RightHands.Resolved? = RightHands.current()
     ) -> [Target] {
         let waiting = Set((try? store.waitingSessions().map(\.sessionId)) ?? [])
         return live.sorted { ($0.cwd ?? "") < ($1.cwd ?? "") }.map { s in
@@ -85,11 +94,13 @@ public enum ManagerJSON {
                     ?? GridAssembler.tabDisplayName(live: s, callsign: nil),
                 enrolled: isEnrolled(s.sessionId, s.cwd),
                 goal: brief?.goal, topic: brief?.topic ?? stop?.briefTopic,
-                waiting: waiting.contains(s.sessionId))
+                waiting: waiting.contains(s.sessionId),
+                rightHand: rightHands.map { $0.contains(s.sessionId) })
         }
     }
 
-    public static func status(store: QueueStore) throws -> Status {
+    public static func status(store: QueueStore,
+                              rightHands: RightHands.Resolved? = RightHands.current()) throws -> Status {
         let open = try store.waitingSessions()
         let rows = open.map { w -> WaitingRow in
             let brief = try? store.storedBrief(sessionId: w.sessionId, eventRowid: w.latestId)
@@ -97,19 +108,32 @@ public enum ManagerJSON {
                 sessionId: w.sessionId, project: w.projectLabel,
                 name: GridAssembler.tabDisplayName(for: w, live: nil),
                 topic: w.briefTopic ?? brief?.topic, goal: brief?.goal,
-                eventId: w.latestId, heard: w.heard)
+                eventId: w.latestId, heard: w.heard,
+                rightHand: rightHands.map { $0.contains(w.sessionId) })
         }
         return Status(waiting: rows, unannounced: open.filter { !$0.heard }.count)
+    }
+
+    /// The brief a session's latest turn carries: the stored one, or — for a
+    /// right-hand with a rollup — the rollup read NOW, so the manager and the
+    /// card see the projects as they stand rather than as they stood at the
+    /// last Stop. Nil when there is neither.
+    static func latestBrief(store: QueueStore, sessionId: String) throws -> (stop: WaitingSession, brief: SessionBrief)? {
+        guard let stop = try store.latestStop(for: sessionId) else { return nil }
+        if let rollup = RightHands.rollup(for: sessionId) {
+            let topic = GridAssembler.pinnedNames(sessionId) ?? stop.projectLabel
+            return (stop, rollup.brief(topic: topic))
+        }
+        guard let stored = try store.storedBrief(sessionId: sessionId, eventRowid: stop.latestId)
+        else { return nil }
+        return (stop, stored.brief)
     }
 
     /// The latest brief for a session, with its ladder. Nil when the session has
     /// no stored brief yet (a turn the app has not summarised is not a brief).
     public static func brief(store: QueueStore, sessionId: String) throws -> Brief? {
-        guard let stop = try store.latestStop(for: sessionId),
-              let stored = try store.storedBrief(sessionId: sessionId, eventRowid: stop.latestId)
-        else { return nil }
+        guard let (stop, brief) = try latestBrief(store: store, sessionId: sessionId) else { return nil }
         let sanitizer = SpokenTextSanitizer()
-        let brief = stored.brief
         let spoken = sanitizer.sanitize(brief.spokenText(), allowing: [])
         let announcement = Coordinator.Announcement(
             event: stop, brief: brief, spoken: spoken, via: "manager")
@@ -127,10 +151,7 @@ public enum ManagerJSON {
     /// The stored announcement for a session's latest turn, rebuilt from the
     /// brief table with no model call: what the ladder and the `rung` verb read.
     public static func announcement(store: QueueStore, sessionId: String) throws -> Coordinator.Announcement? {
-        guard let stop = try store.latestStop(for: sessionId),
-              let stored = try store.storedBrief(sessionId: sessionId, eventRowid: stop.latestId)
-        else { return nil }
-        let brief = stored.brief
+        guard let (stop, brief) = try latestBrief(store: store, sessionId: sessionId) else { return nil }
         let spoken = SpokenTextSanitizer().sanitize(brief.spokenText(), allowing: [])
         return Coordinator.Announcement(event: stop, brief: brief, spoken: spoken, via: "manager")
     }

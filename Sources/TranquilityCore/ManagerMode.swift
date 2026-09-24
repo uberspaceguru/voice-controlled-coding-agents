@@ -165,9 +165,15 @@ public enum ManagerConfig {
     /// The child's environment: the user's, plus the marker that tells the
     /// bot the app is hosting it (so the app plays the cues, not the bot) and
     /// a PATH that can find `uv`, `open`, and `tbase`.
-    public static func environment(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    public static func environment(base: [String: String] = ProcessInfo.processInfo.environment,
+                                   scheme: String = AppIdentity.urlScheme) -> [String: String] {
         var env = base
         env["TB_HOST"] = "app"
+        // The lane that started the child is the lane its links must reach
+        // (23 Sep): Dev hands over `tbdev`, Prod `tranquilitybase`. A launcher
+        // script that overwrites TB_URL_SCHEME inside the child still wins,
+        // which is the one place left for a link to go to the wrong lane.
+        env["TB_URL_SCHEME"] = scheme
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let extra = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
         env["PATH"] = (extra + (env["PATH"] ?? "").split(separator: ":").map(String.init)).joined(separator: ":")

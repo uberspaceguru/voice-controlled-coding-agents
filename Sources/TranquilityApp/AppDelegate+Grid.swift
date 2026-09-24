@@ -179,6 +179,20 @@ extension AppDelegate {
             known.compactMap { row in row.callsign.map { (row.sessionId, $0) } },
             uniquingKeysWith: { first, _ in first })
 
+        // The right-hands, resolved against everything this tick knows —
+        // the live list for directories, the store for ids, ownership for tmux
+        // names — and published so every name lookup this repaint makes
+        // (`GridAssembler.harnessTitle`) agrees with the rows.
+        let hands = RightHands.publish(
+            sessions: liveById.values.map { (id: $0.sessionId, cwd: $0.cwd) }
+                + known.map { (id: $0.sessionId, cwd: $0.cwd) },
+            ownership: FileSessionOwnershipStore.shared.all())
+        if (hands?.ids.count ?? -1) != lastRightHandCount {
+            Permissions.log(hands.map { "right-hands: \($0.ids.count) session(s) on the panel; everyone else is filed" }
+                            ?? "right-hands: no roster; every session is on the panel")
+            lastRightHandCount = hands?.ids.count ?? -1
+        }
+
         let delivering = self.delivering
         let verdict = GridAssembler.rows(GridAssembler.RowInputs(
             waiting: (try? coordinator.waiting()) ?? [],
@@ -197,7 +211,8 @@ extension AppDelegate {
             recordedTurns: recordedTurns,
             remote: remoteAgents(waiting: (try? coordinator.waiting()) ?? []),
             // nil is "could not read the registry"; [] is "nobody is home".
-            livenessKnown: probe != nil))
+            livenessKnown: probe != nil,
+            rightHands: hands?.ids))
 
         // Recorded before anything is drawn so the card can ask the same
         // question the rows answered, and get the same answer.

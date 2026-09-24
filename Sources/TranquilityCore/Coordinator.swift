@@ -100,6 +100,12 @@ public struct Coordinator: Sendable {
     /// Zero in tests that assert the refusal itself.
     public let readinessGrace: TimeInterval
 
+    /// The sessions the ear is for (`RightHands`), read on each ask so a file
+    /// written mid-session takes effect without a restart. Nil is everyone,
+    /// which is the panel as it always was. Injected so a test can hand in a
+    /// roster without a file.
+    public let rightHands: @Sendable () -> RightHands.Roster?
+
     public init(
         store: QueueStore,
         summarizer: SummarizerChain = SummarizerChain(),
@@ -117,6 +123,7 @@ public struct Coordinator: Sendable {
         attachments: AttachmentStore = AttachmentStore(),
         replyWindow: TimeInterval = 15 * 60,
         readinessGrace: TimeInterval = 12,
+        rightHands: @escaping @Sendable () -> RightHands.Roster? = { RightHands.load() },
         resumeTwin: @escaping @Sendable (_ sessionId: String, _ directory: String,
                                          _ harness: String) -> TmuxPaneAddress?
             = { sessionId, directory, harness in
@@ -151,6 +158,7 @@ public struct Coordinator: Sendable {
         self.attachments = attachments
         self.replyWindow = replyWindow
         self.readinessGrace = readinessGrace
+        self.rightHands = rightHands
         self.resumeTwin = resumeTwin
     }
 

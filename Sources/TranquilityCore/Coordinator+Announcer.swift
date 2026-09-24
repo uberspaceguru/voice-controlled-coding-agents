@@ -20,7 +20,25 @@ extension Coordinator {
     /// to — a model call and an ElevenLabs round trip spent on an announcement
     /// that must not play.
     public func prepareNext(excluding inFlight: DeliveryInFlight = DeliveryInFlight()) async throws {
+        // A director's rollup is read when it is asked for, never ahead of
+        // time: the projects move between Stops, and a summary prepared at
+        // the last one would read them as they were. There is no model call
+        // to take off the critical path, so nothing is lost by not preparing.
+        if let roster = rightHands(), roster.summarizeOthers {
+            // The director wants `tbase brief` for everyone: prepare the next
+            // unheard session that is NOT a hand too. One per tick, like the
+            // hands' own, and never spoken by the automatic path.
+            let hands = Set(try attended().map(\.sessionId))
+            if let other = try waiting().first(where: {
+                !$0.heard && !hands.contains($0.sessionId)
+                    && !inFlight.supersedesWaiting($0.sessionId, latestId: $0.latestId)
+            }), await !prepared.has(other.sessionId, latest: other.latestId) {
+                let summary = await resolveSummary(for: other)
+                await prepared.put(summary, for: other.sessionId, latest: other.latestId)
+            }
+        }
         guard let session = try nextToAnnounce(excluding: inFlight) else { return }
+        guard rollupPath(for: session) == nil else { return }
         guard await !prepared.has(session.sessionId, latest: session.latestId) else {
             // Text already in hand, but the VOICE may not be: a summary restored
             // from the store, or prepared before the roster resolved, leaves the
@@ -91,10 +109,40 @@ extension Coordinator {
         // waiting list: one list, one bit, filtered here at the only site that
         // cares. A heard session stays in waiting() — still lit, still owed —
         // it just isn't read out twice.
-        try waiting().first {
+        try attended().first {
             !$0.heard && !inFlight.supersedesWaiting($0.sessionId, latestId: $0.latestId)
         }
     }
+
+    /// `waiting()`, for the ear: the same list cut to the user's right-hands
+    /// when they have named any (`RightHands`), and the whole list when they
+    /// have not. The automatic paths — announce, replay, the badge, the
+    /// prefetch — read this; `waiting()` itself stays whole, because the grid's
+    /// bands and `tbase status` describe what the AGENTS claim, and a session
+    /// the user is not listening to is still waiting.
+    public func attended() throws -> [WaitingSession] {
+        let all = try waiting()
+        guard let roster = rightHands() else { return all }
+        let resolved = roster.resolve(sessions: all.map { (id: $0.sessionId, cwd: $0.cwd) },
+                                      ownership: ownership.all())
+        return all.filter { resolved.contains($0.sessionId) }
+    }
+
+    /// The hand a waiting session belongs to, resolved through the injected
+    /// roster against the session's own directory and the ownership records,
+    /// so a test can hand in a roster and a file of its own. Nil for a
+    /// session that is not a hand, or with no roster at all.
+    func hand(for event: WaitingSession) -> (name: String?, rollup: String?)? {
+        guard let roster = rightHands() else { return nil }
+        let resolved = roster.resolve(sessions: [(id: event.sessionId, cwd: event.cwd)],
+                                      ownership: ownership.all())
+        guard resolved.contains(event.sessionId) else { return nil }
+        return (resolved.names[event.sessionId],
+                resolved.rollups[event.sessionId].map { ($0 as NSString).expandingTildeInPath })
+    }
+
+    /// Where a session's rollup lives, or nil.
+    func rollupPath(for event: WaitingSession) -> String? { hand(for: event)?.rollup }
 
     /// What ⌃⌥ plays when nothing is unopened: the next waiting row AFTER the
     /// one you just heard, wrapping at the end. Anything green always plays
@@ -119,7 +167,7 @@ extension Coordinator {
         after: String? = nil,
         excluding inFlight: DeliveryInFlight = DeliveryInFlight()
     ) throws -> WaitingSession? {
-        let stack = try waiting().filter {
+        let stack = try attended().filter {
             !inFlight.supersedesWaiting($0.sessionId, latestId: $0.latestId)
         }
         guard let after, let mark = stack.firstIndex(where: { $0.sessionId == after })
@@ -217,7 +265,10 @@ extension Coordinator {
     // and why the state moved out of a set of Coordinator's own statics.
     // `waiting()`, above, is the only caller.
 
-    public func waitingCount() throws -> Int { try waiting().count }
+    /// The badge. Cut to the right-hands like the ear is: the number in the
+    /// menu bar is a hail, and a hail for a session the user has said is not
+    /// theirs to watch is the noise the roster exists to stop.
+    public func waitingCount() throws -> Int { try attended().count }
 
     /// You are done with it without hearing it.
     ///
@@ -320,7 +371,10 @@ extension Coordinator {
             }
         }
 
-        if let ready = await prepared.take(session.sessionId, latest: session.latestId) {
+        // A rollup is never served from `prepared`: it is read fresh in
+        // `resolveSummary`, because the card is the projects as they stand.
+        if rollupPath(for: session) == nil,
+           let ready = await prepared.take(session.sessionId, latest: session.latestId) {
             return try await speak(ready, for: session, onWillSpeak: onWillSpeak, onWord: onWord)
         }
         // Prepared miss — usually a restart. The brief for this exact event may
@@ -361,6 +415,17 @@ extension Coordinator {
                            brief: SessionBrief(topic: event.projectLabel, happened: ""),
                            provider: "none", latencyMs: 0)
         }
+        // A DIRECTOR'S CARD SHOWS PROJECTS, NOT ITS LAST TURN (23 Sep). A hand
+        // with a rollup keeps a file of the projects it is running, and that
+        // file is the brief: read now, no model call, no stored copy consulted.
+        // The names in it are the director's own words and are allowed through
+        // the sanitizer as such. Persisted like any brief so the hub and
+        // `tbase brief` carry the same card. An unreadable rollup falls
+        // through to the ordinary summary rather than to silence.
+        if let summary = rollupSummary(for: event) {
+            persistBrief(summary, for: event)
+            return summary
+        }
         if summarizer.providers.contains(where: { $0.usesManagedCredits }) {
             return await managedPreparations.value(for: event.latestId) {
                 if let restored = restoredSummary(for: event) { return restored }
@@ -369,6 +434,21 @@ extension Coordinator {
         }
         if let restored = restoredSummary(for: event) { return restored }
         return await summarize(event)
+    }
+
+    /// The rollup composed as a `Summary`, or nil for a session without one.
+    func rollupSummary(for event: WaitingSession) -> Summary? {
+        guard let hand = hand(for: event), let path = hand.rollup else { return nil }
+        guard let rollup = RightHands.Rollup.load(path: path) else {
+            Coordinator.trace?("rollup for \(event.sessionId.prefix(8)) at \(path) is unreadable; summarising the turn instead")
+            return nil
+        }
+        let topic = hand.name ?? GridAssembler.pinnedNames(event.sessionId) ?? event.projectLabel
+        let brief = rollup.brief(topic: topic)
+        let allowed = Set([topic] + rollup.projects.map(\.name))
+            .union(SpokenTextSanitizer.speakableTerms(in: brief.spokenText()))
+        return Summary(spoken: summarizer.sanitizer.sanitize(brief.spokenText(), allowing: allowed),
+                       brief: brief, provider: "rollup", latencyMs: 0)
     }
 
     private func summarize(_ event: WaitingSession) async -> Summary {

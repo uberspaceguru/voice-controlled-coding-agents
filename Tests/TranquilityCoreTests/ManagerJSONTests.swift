@@ -75,6 +75,29 @@ final class ManagerJSONTests: XCTestCase {
         XCTAssertEqual(targets.first?.waiting, true)
         XCTAssertEqual(targets.first?.enrolled, true)
         XCTAssertFalse(targets.first?.name?.isEmpty ?? true)
+        XCTAssertNil(targets.first?.rightHand, "no roster: the key is absent, and the manager reads everyone")
+    }
+
+    /// With a roster every row says whether it is a hand, so the manager can
+    /// make the grid's cut without a second read; and the name is the pinned
+    /// one, so "Director" is what the manager says and hears.
+    func testTargetsAndStatusCarryTheRightHandFlagAndThePinnedName() throws {
+        _ = try seed()
+        _ = try seed(session: "sess-2", goal: "something else")
+        let hands = RightHands.Resolved(ids: ["sess-1"], names: ["sess-1": "Director"])
+        let live = [
+            LiveSession(pid: 4242, sessionId: "sess-1", cwd: "/tmp/kopi-outreach", status: "idle", name: "outreach", waitingFor: nil),
+            LiveSession(pid: 4243, sessionId: "sess-2", cwd: "/tmp/other", status: "idle", name: "other", waitingFor: nil),
+        ]
+        GridAssembler.pinnedNames = { hands.names[$0] }
+        defer { GridAssembler.pinnedNames = { RightHands.pinnedName(for: $0) } }
+        let targets = ManagerJSON.targets(store: store, live: live, isEnrolled: { _, _ in true }, rightHands: hands)
+        XCTAssertEqual(targets.map(\.rightHand), [true, false])
+        XCTAssertEqual(targets.first?.name, "Director")
+        let status = try ManagerJSON.status(store: store, rightHands: hands)
+        XCTAssertEqual(Set(status.waiting.map { "\($0.sessionId):\($0.rightHand == true)" }), ["sess-1:true", "sess-2:false"])
+        // The encoded key is what tb-voice reads.
+        XCTAssertTrue(ManagerJSON.encode(targets).contains(#""rightHand":true"#))
     }
 
     func testEncodingIsStableAndSorted() throws {

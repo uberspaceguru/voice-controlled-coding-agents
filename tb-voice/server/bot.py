@@ -115,6 +115,34 @@ async def keyterms(body: dict | None = None) -> list[str]:
     return names[:100]
 
 
+async def read_commands(queue: "asyncio.Queue") -> None:
+    """stdin → the session's command queue. One JSON object per line; anything
+    else is logged and dropped, never raised: a stray byte on stdin must not
+    end hands-free."""
+    import asyncio
+    import json
+    import sys
+
+    loop = asyncio.get_event_loop()
+    reader = asyncio.StreamReader()
+    try:
+        await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+    except Exception as e:  # noqa: BLE001 — no stdin (a tty, a closed pipe): nothing to read
+        logger.info(f"commands: stdin not readable ({e}); no commands from the app")
+        return
+    while True:
+        raw = await reader.readline()
+        if not raw:
+            return
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            logger.warning(f"commands: not JSON: {raw[:80]!r}")
+            continue
+        if isinstance(obj, dict) and obj.get("cmd"):
+            await queue.put(obj)
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     # Which commit is answering. Nothing recorded this, so a report from the
     # room could not be tied to a build (hf-15). The deploy writes the stamp;
@@ -254,6 +282,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             await emit(None, "reloading", text=", ".join(files))
 
         asyncio.get_event_loop().create_task(watch(_on_change))
+        # The app's commands come down stdin, one JSON line each (the app
+        # writes `{"cmd": "stage", ...}` when a right-hand's card is opened).
+        # Read here, off the pipeline, into the session's queue; the Manager
+        # drains it. EOF is the app going away, and the reader simply ends.
+        asyncio.get_event_loop().create_task(read_commands(session.current().commands))
 
     try:
         @transport.event_handler("on_client_connected")

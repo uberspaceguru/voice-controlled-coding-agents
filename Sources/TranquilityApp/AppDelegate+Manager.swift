@@ -530,6 +530,45 @@ extension AppDelegate {
             .appendingPathComponent("api").appendingPathComponent("offer")
     }
 
+    /// Put a right-hand on the manager's stage, starting hands-free if it is
+    /// off (23 Sep, "opening Director's card starts a hands-free-style
+    /// conversation"). The manager's stage is what makes "what's blocking the
+    /// design work?" a question answered from the director's rollup and
+    /// "tell it to ship the fix" a message typed into the director; without a
+    /// stage the manager waits to be named. Sent on the child's stdin
+    /// (local) or as a text frame (hosted); a manager still coming up gets it
+    /// on `ready`. Nothing here records: the manager's own microphone is
+    /// hands-free's, and the user pressed the card.
+    @MainActor
+    func stageForManager(session: String, name: String) {
+        if !managerIsOn {
+            guard ManagerConfig.availability() != .unset else {
+                Permissions.log("manager: \(name)'s card opened, but hands-free is not set up; no stage")
+                return
+            }
+            Permissions.log("manager: \(name)'s card opened; starting hands-free with \(name) on stage")
+            pendingStage = (session, name)
+            startManager()
+            rebuildMenu()
+            return
+        }
+        sendManagerCommand(["cmd": "stage", "session": session, "name": name])
+    }
+
+    /// One JSON line down to the bot. The bot reads `cmd` lines beside the
+    /// `reply` lines it already parses (tb-voice/server/wire.py, bot.py).
+    @MainActor
+    func sendManagerCommand(_ command: [String: Any]) {
+        Permissions.log("manager: command \(command["cmd"] ?? "?") \((command["name"] as? String) ?? "")")
+        if let socket = managerSocket {
+            socket.send(command: command)
+            return
+        }
+        guard let transport = managerTransport,
+              let data = try? JSONSerialization.data(withJSONObject: command) else { return }
+        Task { try? await transport.write(data) }
+    }
+
     /// The grid's display names, for the transcriber's key terms.
     static func fleetNames() async -> [String] {
         let (code, out) = await answerManagerRequest(["tbase", "targets", "--json"])
@@ -624,6 +663,12 @@ extension AppDelegate {
             Earcons.acknowledge(.listening)
             managerReconnects = 0
             hud.setManagerState(StatusHUD.orbState, line: "listening")
+            // A card opened while the child was still coming up: the stage
+            // it asked for is handed over now that somebody is listening.
+            if let pending = pendingStage {
+                pendingStage = nil
+                sendManagerCommand(["cmd": "stage", "session": pending.session, "name": pending.name])
+            }
         case .hearing:
             hud.setManagerState(StatusHUD.orbState, line: "hearing you", mood: "hearing")
         case .listening:

@@ -34,6 +34,28 @@ public enum AppIdentity {
     public static var databaseSchemaVersion: Int {
         (Bundle.main.object(forInfoDictionaryKey: "TBDatabaseSchemaVersion") as? Int) ?? 18
     }
+
+    /// Every URL scheme this bundle claims, in Info.plist order.
+    public static var urlSchemes: [String] {
+        let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]]
+        return types?.flatMap { ($0["CFBundleURLSchemes"] as? [String]) ?? [] } ?? []
+    }
+
+    /// The scheme a child process should use to reach THIS lane, and only
+    /// this lane. Dev claims `tbdev` on top of the two production schemes
+    /// (bundle-dev.sh), so a manager started by Dev that wrote
+    /// `tranquilitybase://` would open whichever lane LaunchServices
+    /// preferred — and a manager started by Prod that wrote `tbdev://`, as
+    /// the developer's launcher did on 23 Sep, reached nothing at all: Prod
+    /// does not claim it. Pure over the list so it is testable without a
+    /// bundle.
+    public static var urlScheme: String { preferredScheme(among: urlSchemes, channel: channel) }
+
+    static func preferredScheme(among schemes: [String], channel: AppChannel) -> String {
+        if channel == .development, schemes.contains("tbdev") { return "tbdev" }
+        if schemes.contains("tranquilitybase") { return "tranquilitybase" }
+        return schemes.first ?? "tranquilitybase"
+    }
 }
 
 /// Preferences that describe the product, not one code-signing identity.
