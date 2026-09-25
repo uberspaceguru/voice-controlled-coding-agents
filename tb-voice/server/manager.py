@@ -599,48 +599,61 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                 return
             self._require_current()
 
-    async def _hand_to_card(self, name: str, words: str) -> bool:
-        """In Tranquility Base Director (TB_RIGHT_HAND_CARDS), hand the turn to
-        the app, which asks the hand's brain and speaks the answer on the
-        hand's own card (25 Sep). False when the host cannot, or the hand has no
-        brain there: the caller answers in this voice instead."""
-        import director_link
-        hand = director_link.hand_named(name)
-        if not director_link.cards_host() or not hand or not hand.get("session") or not hand.get("ask"):
-            return False
-        note("you", f"{name}: {words}", "handed to its card")
-        await emit(self, "ask", session=hand["session"], name=name, text=words)
-        return True
+    def _card_secs(self, reply: str) -> float:
+        """How long the app's card will speak `reply`: the mic's mute window."""
+        return min(30.0, 1.5 + 0.42 * len(reply.split()))
+
+    async def _answer_on_card(self, hand: dict, name: str, reply: str):
+        """The answer, spoken on the hand's own card by the app (Tranquility Base
+        Director, TB_RIGHT_HAND_CARDS). The manager asked, so it knows the words:
+        it holds the voice lock and mutes this mic for their length, because the
+        card's voice is echo here and a Director that hears itself answers
+        itself (25 Sep)."""
+        secs = self._card_secs(reply)
+        await self._input_ready.wait()
+        async with self._voice:
+            self._require_current()
+            EXTERNAL_UNTIL["t"] = time.monotonic() + secs
+            await emit(self, "answer", session=hand["session"], name=name, text=reply)
+            await asyncio.sleep(secs)
 
     async def _relay_hand(self, name: str, words: str, text: str):
-        """'Yobi1, …', 'Sys-3PO, …': the hand answers, never this voice. On the
-        hand's card when the host can; else its `ask` here, spoken as
-        '<name>: …'; a hand with no brain here goes to Director, who can tell
-        it; a hand with no session is a placeholder and says so."""
+        """'Director, …', 'Yobi1, …', 'Sys-3PO, …': the hand answers, never this
+        voice. Its `ask` runs here (Director's in the session's one thread, so
+        "yes" and "the second one" bind); the answer is spoken on the hand's
+        card when the host has cards, else here as '<name>: …'. A hand with no
+        brain here goes to Director, who can tell it; a hand with no session is
+        a placeholder and says so."""
         import director_link
         hand = director_link.hand_named(name) or {}
         if not hand.get("session"):
             await self._say(f"{name} isn't connected yet.", response_mode="receipt")
             return
-        if await self._hand_to_card(name, words):
-            return
-        argv = director_link.hand_argv(hand, words)
+        argv = (director_link.ask_argv(words) if name == "Director"
+                else director_link.hand_argv(hand, words))
         if not argv:
-            await self._relay_director(text)
+            await self._relay_hand("Director", text, text) if director_link.hand_named("Director") \
+                else await self._relay_director(text)
             return
         await emit(self, "tool", argv=[name, words[:80]], meaning=f"asking {name}")
         code, out = await _run(*argv, timeout=60)
+        self._require_current()
         reply = director_link.flatten(out) if code == 0 else ""
         if not reply:
             logger.error(f"{name} ask failed ({code}): {out[-300:]}")
             await self._say(f"{name} didn't answer just now.", response_mode="receipt")
             return
         note(name, reply, "spoken")
+        if director_link.cards_host():
+            await self._answer_on_card(hand, name, reply)
+            return
         first = True
         for part in director_link.chunks(reply):
             line = (f"{name}: " + part) if first else part
             first = False
-            if await self._say(line, response_mode="detail") is not True:
+            spoken = (await self._say(line, voice="director", response_mode="detail") if name == "Director"
+                      else await self._say(line, response_mode="detail"))
+            if spoken is not True:
                 return
             self._require_current()
 

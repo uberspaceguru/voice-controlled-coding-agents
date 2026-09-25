@@ -104,6 +104,13 @@ class ByName(unittest.TestCase):
                          ["ask", "hi", "--channel", "tranquility", "--external-id", "ac03daf5"])
         self.assertIsNone(d.hand_argv(d.hand_named("TeamChat Manager"), "hi"))
 
+    def test_director_default_routes_everything_but_a_name_or_stop(self):
+        for t, want in (("yes", ("ask", "yes")), ("the second one", ("ask", "the second one")),
+                        ("Director, what needs me?", ("ask", "what needs me?")),
+                        ("Yobi1, what's my day?", ("hand", "Yobi1", "what's my day?")),
+                        ("stop", ("mute", "")), ("Okay, stop.", ("mute", "")), ("", None), ("...", None)):
+            self.assertEqual(d.route_default(t), want, t)
+
     def test_the_roster_is_the_host_apps(self):
         from unittest.mock import patch
         with patch.dict(os.environ, {"VOICE_DISPATCH_SUPPORT_DIR": "/x/VoiceDispatch-Director"}, clear=False):
@@ -156,15 +163,37 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
 
     async def test_in_the_director_app_the_card_answers(self):
         from unittest.mock import AsyncMock, patch
+        self.m._card_secs = lambda reply: 0
+        replies = AsyncMock(side_effect=[(0, "You have two meetings today."), (0, "Ahmed, nine things need you.")])
         with patch.dict(os.environ, {"TB_RIGHT_HAND_CARDS": "1"}), \
-                patch("manager._run", AsyncMock()) as run, patch("manager.emit", AsyncMock()) as emit:
+                patch("manager._run", replies) as run, patch("manager.emit", AsyncMock()) as emit:
             await self.m._dialogue_turn("Yobi one, what's on today?", None, None)
             await self.m._dialogue_turn("Director, what needs me?", None, None)
-        run.assert_not_awaited()
+        self.assertEqual(run.await_args_list[0].args, (os.path.expanduser("~/brains/yobi1-ask"), "what's on today?"))
+        self.assertEqual(run.await_args_list[1].args[-1], "ac03daf5", "the Director card's own thread")
         self.m._say.assert_not_awaited()
-        asks = [c.kwargs for c in emit.await_args_list if c.args[1:] == ("ask",)]
-        self.assertEqual(asks, [{"session": "e781aff1", "name": "Yobi1", "text": "what's on today?"},
-                                {"session": "ac03daf5", "name": "Director", "text": "what needs me?"}])
+        answers = [c.kwargs for c in emit.await_args_list if c.args[1:] == ("answer",)]
+        self.assertEqual(answers, [{"session": "e781aff1", "name": "Yobi1", "text": "You have two meetings today."},
+                                   {"session": "ac03daf5", "name": "Director", "text": "Ahmed, nine things need you."}])
+
+    async def test_hands_free_in_the_director_app_talks_to_director(self):
+        from unittest.mock import AsyncMock, patch
+        self.m._card_secs = lambda reply: 0
+        run = AsyncMock(return_value=(0, "Done."))
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()):
+            for t in ("yes", "the second one", "tell the Wispr worker yes", "what's the weather like"):
+                await self.m._dialogue_turn(t, None, None)
+            self.m.broadcast_interruption = AsyncMock()
+            self.m._do_mute = AsyncMock()
+            await self.m._dialogue_turn("stop", None, None)
+            await self.m._dialogue_turn("   ", None, None)
+        asked = [(c.args[2], c.args[-1]) for c in run.await_args_list]
+        self.assertEqual(asked, [("yes", "ac03daf5"), ("the second one", "ac03daf5"),
+                                 ("tell the Wispr worker yes", "ac03daf5"), ("what's the weather like", "ac03daf5")],
+                         "every utterance, one thread")
+        self.m._jev.ask.assert_not_awaited()
+        self.m._do_mute.assert_awaited_once()
 
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)

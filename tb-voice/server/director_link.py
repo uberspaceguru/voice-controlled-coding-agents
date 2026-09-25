@@ -22,6 +22,14 @@ voice; it is not the fleet manager and it is not Director. So:
    TB_RIGHT_HAND_CARDS) the turn is handed to the app, which speaks the answer
    on the hand's own card. A hand with no session is a placeholder and says so.
 
+5. Hands-free in Tranquility Base Director talks to DIRECTOR by default (25 Sep,
+   Ahmed: "talking to you conversationally, kind of like how Hands-Free works,
+   as you're monitoring all the agents"). The host sets
+   TB_DEFAULT_INTERLOCUTOR=director; then every utterance is Director's
+   (`route_default`), in one thread for the whole session so "yes" and "the
+   second one" bind, and a hand's name at the start ("Yobi1, …") switches the
+   interlocutor for that utterance only. A bare "stop" still stops the voice.
+
 `route` is pure, so tests/test_director_link.py runs without the pipeline.
 """
 
@@ -112,6 +120,45 @@ def _named_hand(t: str, names: list[str]) -> tuple[str, str] | None:
     return None
 
 
+_MUTE = re.compile(r"(?i)^\s*(?:ok(?:ay)?[,\s]+)?(?:stop|quiet|be quiet|shut up|hush|pause|enough|that's enough|"
+                   r"hold on|never ?mind|cancel)\s*[.!]*\s*$")
+
+
+def director_default() -> bool:
+    """The host talks to Director by default (the Director app)."""
+    return os.getenv("TB_DEFAULT_INTERLOCUTOR", "").strip().lower() == "director"
+
+
+def route_default(text: str, names: list[str] | None = None) -> tuple[str, ...] | None:
+    """Director's hands-free: every utterance is Director's unless it opens with
+    another hand's name, or is only "stop". None for an empty turn."""
+    t = (text or "").strip()
+    if not t or not re.search(r"[A-Za-z0-9]", t):
+        return None
+    if _MUTE.match(t):
+        return ("mute", "")
+    named = _named_hand(t, right_hands() if names is None else names)
+    if named:
+        return ("hand", named[0], named[1] or "what needs me?")
+    m = _VOCATIVE.match(t)
+    if m:
+        return ("ask", t[m.end():].strip() or "what needs me?")
+    return ("ask", t)
+
+
+def session_thread(path: str | None = None) -> str:
+    """The one conversation id for a hands-free session. In the Director app it
+    is the Director card's own thread (its session id), so what the card
+    showed and what the voice says are one numbered list; else THREAD."""
+    if os.getenv("TB_DIRECTOR_THREAD"):
+        return os.environ["TB_DIRECTOR_THREAD"]
+    if cards_host():
+        hand = hand_named("Director", path)
+        if hand and hand.get("session"):
+            return hand["session"]
+    return THREAD
+
+
 def route(text: str, names: list[str] | None = None) -> tuple[str, ...] | None:
     """What to do with a turn, or None to leave it to the dialogue policy.
 
@@ -148,8 +195,8 @@ def director_bin() -> str:
             or os.path.expanduser("~/.local/bin/director"))
 
 
-def ask_argv(text: str, thread: str = THREAD) -> list[str]:
-    return [director_bin(), "ask", text, "--channel", "tranquility", "--external-id", thread]
+def ask_argv(text: str, thread: str | None = None) -> list[str]:
+    return [director_bin(), "ask", text, "--channel", "tranquility", "--external-id", thread or session_thread()]
 
 
 def flatten(reply: str) -> str:

@@ -123,7 +123,15 @@ class DialogueManagerMixin(MemoryManagerMixin):
             # an agent something. Who the voice is, it answers itself. Neither
             # costs a Jev call, and neither can be judged into "silent".
             import director_link
-            routed = director_link.route(text)
+            # In Tranquility Base Director every utterance is Director's (25 Sep):
+            # nothing is judged, nothing is left silent but an empty turn.
+            default = director_link.director_default()
+            routed = director_link.route_default(text) if default else director_link.route(text)
+            if routed is None and default:
+                settled = True
+                self._judging = None
+                self._input_ready.set()
+                return
             if routed is not None:
                 settled = True
                 self._judging = None
@@ -133,9 +141,14 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 await emit(self, "addressed", intent="director_" + routed[0], text=text[:120])
                 if routed[0] == "identity":
                     await self._say(director_link.IDENTITY_LINE, response_mode="receipt")
+                elif routed[0] == "mute":
+                    await self.broadcast_interruption()
+                    await self._do_mute("", frame, direction)
                 elif routed[0] == "hand":
                     await self._relay_hand(routed[1], routed[2], text)
-                elif not await self._hand_to_card("Director", routed[1]):
+                elif director_link.hand_named("Director"):
+                    await self._relay_hand("Director", routed[1], text)
+                else:
                     await self._relay_director(routed[1])
                 return
             targets = await self._targets()
