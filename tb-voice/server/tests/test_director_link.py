@@ -111,6 +111,34 @@ class ByName(unittest.TestCase):
                         ("stop", ("mute", "")), ("Okay, stop.", ("mute", "")), ("", None), ("...", None)):
             self.assertEqual(d.route_default(t), want, t)
 
+    def test_the_real_microphone_spellings(self):
+        # Measured through the MacBook microphone, 25 Sep.
+        self.assertEqual(d.route_default("Yobi-Wan. What's my day?"), ("hand", "Yobi1", "What's my day?"))
+        self.assertEqual(d.route_default("Tell the Whisper worker yes."), ("ask", "Tell the Wispr worker yes."))
+        self.assertEqual(d.route_default("Director."), ("call", "Director"), "a name alone is a call")
+        self.assertEqual(d.route_default("Yodhi1. What's my day?"), ("hand", "Yobi1", "What's my day?"))
+        self.assertEqual(d.route_default("Come on. What's my day?"), ("ask", "Come on. What's my day?"),
+                         "a near name needs to be near")
+        self.assertEqual(d.route_default("Yoda, what's my day?"), ("ask", "Yoda, what's my day?"))
+        self.assertEqual(d.route_default("Yobi one?"), ("call", "Yobi1"))
+
+    def test_the_cards_own_voice_is_not_a_turn(self):
+        answer = ("WeAreDevelopers World Congress 2026: North America (San José, California) Head to San José, "
+                  "California. Should you head to San José, California?")
+        self.assertTrue(d.is_echo("Would you head to San Jose? California.", answer, 12.0))
+        self.assertFalse(d.is_echo("Tell me more about the first one.", answer, 5.0))
+        self.assertFalse(d.is_echo("yes", answer, 3.0), "one word is Ahmed's")
+        self.assertFalse(d.is_echo("Should you head to San Jose California", answer, d.ECHO_SECS + 1))
+
+    def test_the_utterance_after_a_call_goes_to_the_one_called(self):
+        self.assertEqual(d.answer_call(("ask", "what's my day?"), ("Yobi1", 100.0), 103.0),
+                         ("hand", "Yobi1", "what's my day?"))
+        self.assertEqual(d.answer_call(("ask", "what needs me?"), ("Director", 100.0), 103.0), ("ask", "what needs me?"))
+        self.assertEqual(d.answer_call(("ask", "hello"), ("Yobi1", 100.0), 100.0 + d.CALL_WINDOW + 1), ("ask", "hello"),
+                         "a call expires")
+        self.assertEqual(d.answer_call(("hand", "Sys-3PO", "status"), ("Yobi1", 100.0), 101.0),
+                         ("hand", "Sys-3PO", "status"), "a name of its own wins")
+
     def test_the_roster_is_the_host_apps(self):
         from unittest.mock import patch
         with patch.dict(os.environ, {"VOICE_DISPATCH_SUPPORT_DIR": "/x/VoiceDispatch-Director"}, clear=False):
@@ -194,6 +222,21 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
                          "every utterance, one thread")
         self.m._jev.ask.assert_not_awaited()
         self.m._do_mute.assert_awaited_once()
+
+    async def test_a_split_vocative_is_asked_once(self):
+        from unittest.mock import AsyncMock, patch
+        self.m._card_secs = lambda reply: 0
+        self.m._earcon = AsyncMock()
+        run = AsyncMock(return_value=(0, "Ahmed, nine things need you."))
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()):
+            await self.m._dialogue_turn("Director.", None, None)
+            await self.m._dialogue_turn("What needs me?", None, None)
+            await self.m._dialogue_turn("Yobi one.", None, None)
+            await self.m._dialogue_turn("what's my day?", None, None)
+        self.m._earcon.assert_awaited_with("listening")
+        self.assertEqual([c.args[1:3] if c.args[1] == "ask" else c.args[1:] for c in run.await_args_list],
+                         [("ask", "What needs me?"), ("what's my day?",)], "one ask each, the second to Yobi1")
 
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)

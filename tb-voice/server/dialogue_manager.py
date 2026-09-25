@@ -126,7 +126,17 @@ class DialogueManagerMixin(MemoryManagerMixin):
             # In Tranquility Base Director every utterance is Director's (25 Sep):
             # nothing is judged, nothing is left silent but an empty turn.
             default = director_link.director_default()
+            last = getattr(self, "_last_answer", None)
+            if default and last and director_link.is_echo(text, last[0], time.monotonic() - last[1]):
+                settled = True
+                self._judging = None
+                self._input_ready.set()
+                note("you", text, "echo of the card, ignored")
+                return
             routed = director_link.route_default(text) if default else director_link.route(text)
+            if default and routed is not None and routed[0] != "call":
+                routed = director_link.answer_call(routed, getattr(self, "_called", None), time.monotonic())
+                self._called = None
             if routed is None and default:
                 settled = True
                 self._judging = None
@@ -141,6 +151,15 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 await emit(self, "addressed", intent="director_" + routed[0], text=text[:120])
                 if routed[0] == "identity":
                     await self._say(director_link.IDENTITY_LINE, response_mode="receipt")
+                elif routed[0] == "call":
+                    # "Director." alone: the cue says it is listening, and the
+                    # next words are the question. A placeholder says so now.
+                    self._called = (routed[1], time.monotonic())
+                    hand = director_link.hand_named(routed[1]) or {}
+                    if routed[1] != "Director" and not hand.get("session"):
+                        await self._relay_hand(routed[1], "", text)
+                    else:
+                        await self._earcon("listening")
                 elif routed[0] == "mute":
                     await self.broadcast_interruption()
                     await self._do_mute("", frame, direction)

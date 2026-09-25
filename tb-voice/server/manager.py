@@ -610,6 +610,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         card's voice is echo here and a Director that hears itself answers
         itself (25 Sep)."""
         secs = self._card_secs(reply)
+        self._last_answer = (reply, time.monotonic())
         await self._input_ready.wait()
         async with self._voice:
             self._require_current()

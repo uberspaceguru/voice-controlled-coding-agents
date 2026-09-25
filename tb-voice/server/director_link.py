@@ -80,9 +80,9 @@ _IDENTITY = re.compile(
 # A right-hand's name as the transcriber writes it, reduced by `_key` (lower
 # case, number words as digits, nothing but letters and digits): "Yobi one",
 # "Yobi-1" -> "yobi1"; "Sys three P O", "C-3PO", "S3PO" -> the sys3po pattern.
-_NUMBERS = {"one": "1", "won": "1", "two": "2", "three": "3", "four": "4", "five": "5"}
+_NUMBERS = {"one": "1", "won": "1", "wan": "1", "two": "2", "three": "3", "four": "4", "five": "5"}
 _ALIASES = {
-    "yobi1": r"y[oa]b+(?:i|y|ee|ie|e)?1",
+    "yobi1": r"y?[oa]b+(?:i|y|ee|ie|e)?1",      # "Yobi-Wan", measured 25 Sep
     "sys3po": r"(?:s[iy]s(?:tem)?|see|sea|c|s)3p(?:o|0|oh|eo)",
     "teamchatmanager": r"teamchat(?:manager)?",
 }
@@ -99,6 +99,24 @@ def _matches(name: str, spoken: str) -> bool:
     return bool(key) and re.fullmatch(_ALIASES.get(key, re.escape(key)), _key(spoken)) is not None
 
 
+def _distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i]
+        for j, y in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return prev[-1]
+
+
+def _close(name: str, spoken: str) -> bool:
+    """Near enough when the name is said as a vocative, with a stop after it:
+    the transcriber heard "Yobi one" as "Yodhi1." and "Yobi-Wan." (25 Sep).
+    Two edits for a name of five letters or more, none below that."""
+    key, heard = _key(name), _key(spoken)
+    return len(key) >= 5 and abs(len(key) - len(heard)) <= 2 and _distance(key, heard) <= 2
+
+
 def _named_hand(t: str, names: list[str]) -> tuple[str, str] | None:
     """(hand name, the rest) when the turn opens by naming a right-hand other
     than Director, else None. Up to four words of name; a stop after it, or no
@@ -112,6 +130,13 @@ def _named_hand(t: str, names: list[str]) -> tuple[str, str] | None:
         for n in others:
             if _matches(n, head):
                 return n, rest.strip()
+
+    # A near name, only before a real stop (never a hyphen inside a word).
+    vstop = re.search(r"\s*[,.:;!?]+\s*", body)
+    if vstop and len(body[:vstop.start()].split()) <= 3:
+        for n in others:
+            if not any(_matches(m, body[:vstop.start()]) for m in others) and _close(n, body[:vstop.start()]):
+                return n, body[vstop.end():].strip()
     words = body.split()
     for k in range(min(4, len(words)), 0, -1):
         for n in others:
@@ -122,6 +147,45 @@ def _named_hand(t: str, names: list[str]) -> tuple[str, str] | None:
 
 _MUTE = re.compile(r"(?i)^\s*(?:ok(?:ay)?[,\s]+)?(?:stop|quiet|be quiet|shut up|hush|pause|enough|that's enough|"
                    r"hold on|never ?mind|cancel)\s*[.!]*\s*$")
+
+
+# How the transcriber spells Ahmed's names, measured on the real microphone
+# (25 Sep): "the Wispr worker" arrives as "the Whisper worker", and Director
+# finds nothing open for it. Fixed before any brain hears the words.
+_SPELLINGS = [(re.compile(r"(?i)\bwhisper\b"), "Wispr"),
+              (re.compile(r"(?i)\byobi[- ]?(?:one|wan|won)\b"), "Yobi1")]
+
+
+def spoken_fixes(text: str) -> str:
+    for pattern, name in _SPELLINGS:
+        text = pattern.sub(name, text)
+    return text
+
+
+# A name said on its own is a CALL, not a question: the transcriber splits
+# "Director, what needs me?" at the comma into two turns (measured 25 Sep), and
+# answering the name alone answered twice. A call is heard with the listening
+# cue, and the next utterance within this window goes to the one called.
+CALL_WINDOW = 8.0
+
+
+# The card's own voice, heard back (25 Sep, real microphone): the mic is muted
+# for the answer's estimated length, and a long answer outlasted the estimate;
+# its tail ("Would you head to San Jose? California.") came back as a turn and
+# went to Director. A turn made mostly of the last answer's words, soon after
+# it, is that answer and not Ahmed.
+ECHO_SECS = 30.0
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").lower().replace("é", "e"))
+
+
+def is_echo(text: str, last_answer: str | None, age: float) -> bool:
+    heard, said = _words(text), set(_words(last_answer or ""))
+    if not heard or not said or age > ECHO_SECS:
+        return False
+    return len(heard) >= 2 and sum(w in said for w in heard) / len(heard) >= 0.75
 
 
 def director_default() -> bool:
@@ -139,11 +203,21 @@ def route_default(text: str, names: list[str] | None = None) -> tuple[str, ...] 
         return ("mute", "")
     named = _named_hand(t, right_hands() if names is None else names)
     if named:
-        return ("hand", named[0], named[1] or "what needs me?")
+        rest = spoken_fixes(named[1]).strip()
+        return ("hand", named[0], rest) if re.search(r"[A-Za-z0-9]", rest) else ("call", named[0])
     m = _VOCATIVE.match(t)
     if m:
-        return ("ask", t[m.end():].strip() or "what needs me?")
-    return ("ask", t)
+        rest = spoken_fixes(t[m.end():]).strip()
+        return ("ask", rest) if re.search(r"[A-Za-z0-9]", rest) else ("call", "Director")
+    return ("ask", spoken_fixes(t))
+
+
+def answer_call(routed: tuple, called: tuple | None, now: float) -> tuple:
+    """The utterance after a call goes to the one called, unless it names
+    someone itself. `called` is (name, when)."""
+    if called and routed and routed[0] == "ask" and now - called[1] < CALL_WINDOW:
+        return ("hand", called[0], routed[1]) if called[0] != "Director" else routed
+    return routed
 
 
 def session_thread(path: str | None = None) -> str:
