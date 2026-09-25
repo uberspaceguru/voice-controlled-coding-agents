@@ -2189,6 +2189,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startWatchingForRevokedPermissions()
         refresh()
 
+        // `--hands-free` (25 Sep): start with hands-free on, for a relaunch
+        // that should come back listening and for the end-to-end acceptance,
+        // which drives the INSTALLED app with no one at the panel. A launch
+        // argument, never a link: only a process on this Mac can pass one, and
+        // a page in a browser must never be able to open a microphone.
+        if CommandLine.arguments.contains("--hands-free") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self, !self.managerIsOn else { return }
+                Permissions.log("manager: --hands-free at launch; starting it")
+                self.startManager()
+                self.rebuildMenu()
+            }
+        }
+
         // NOTHING asks for a permission at launch any more. Reported
         // directly, 26 Aug, against the very build meant to fix this class
         // of complaint: "it shouldn't ask for any permissions before the
