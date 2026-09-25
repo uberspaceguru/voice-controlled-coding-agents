@@ -357,20 +357,22 @@ $URL_SCHEMES_XML      </array>
   <!-- Menu bar only: no dock icon, no main window. -->
   <key>LSUIElement</key><true/>
 
+  <!-- Every consent dialog names the app asking, by its own name (25 Sep:
+       the Director app's prompts said "Tranquility Base", and two apps asked). -->
   <!-- Shown in the microphone prompt. Without this key the process is terminated
        the moment it touches AVAudioEngine, with no prompt at all. -->
   <key>NSMicrophoneUsageDescription</key>
-  <string>Tranquility Base records your spoken reply so it can be transcribed and sent back to the coding session that asked for it. Audio stays on this Mac unless you configure a cloud transcription provider.</string>
+  <string>$APP_NAME records your spoken reply so it can be transcribed and sent back to the coding session that asked for it. Audio stays on this Mac unless you configure a cloud transcription provider.</string>
 
   <!-- "Go to session" and dispatch both drive Terminal via Apple Events. Without
        this key the request is denied silently and the app never appears under
        Privacy > Automation — the same failure mode the microphone had. -->
   <key>NSAppleEventsUsageDescription</key>
-  <string>Tranquility Base focuses the terminal tab a session is running in, and types your dictated reply into it.</string>
+  <string>$APP_NAME focuses the terminal tab a session is running in, and types your dictated reply into it.</string>
 
   <!-- Only needed if Apple's on-device recogniser is used as the fallback tier. -->
   <key>NSSpeechRecognitionUsageDescription</key>
-  <string>Tranquility Base can transcribe your reply on-device when no cloud provider is available, so a recording is never lost.</string>
+  <string>$APP_NAME can transcribe your reply on-device when no cloud provider is available, so a recording is never lost.</string>
 $LS_ENV_XML
 </dict>
 </plist>
