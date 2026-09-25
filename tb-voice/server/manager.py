@@ -1132,7 +1132,6 @@ class Manager(FrameProcessor):
         from urllib.parse import quote
         sid = target["sessionId"]
         who = target.get("name") or "the agent"
-        note("you", text, "acted")
         await emit(self, "tool", argv=["tbase", "ask", sid[:8]], meaning="asking")
         code, out = await _run(TBASE, "ask", sid, text, "--conversation", sid, timeout=75)
         answer = " ".join(out.split()) if code == 0 else ""
@@ -1142,8 +1141,9 @@ class Manager(FrameProcessor):
             return
         spoken_line = spoken(answer)[:600]
         await emit(self, "speaking", voice="agent", session=sid, text=spoken_line[:160])
-        note(who, spoken_line, "spoken")
-        await self._app_speaks(f"{SCHEME}://say?session={sid}&text={quote(spoken_line)}", spoken_line)
+        note(Line(Role.AGENT, LineKind.SPOKEN, spoken_line, speaker=who))
+        await self._app_speaks(f"{SCHEME}://say?session={sid}&text={quote(spoken_line)}", spoken_line,
+                               session_id=sid)
 
     async def _drain_commands(self):
         """Lines the app sends down (`{"cmd": "stage", ...}`), from stdin when
@@ -1171,11 +1171,17 @@ class Manager(FrameProcessor):
         who = target.get("name") or name or "the agent"
         await emit(self, "stage", session=target["sessionId"], goal=target.get("goal"),
                    name=who, project=target.get("project"))
-        note("Tranquility", f"({who} is on stage)", "acted")
-        await self._say(f"{who} is on stage. Ask about any project, or tell it what to do.")
+        line = f"{who} is on stage. Ask about any project, or tell it what to do."
+        await self._say(line)
 
     async def _address_agent(self, text: str, name: str, rest: str):
-        """'Director, …': the named agent takes the stage and gets the words."""
+        """'Director, …': the named agent takes the stage and gets the words.
+
+        Rebased onto compose-less main (#614, 24 Sep): nothing is ever open, so
+        the name alone puts the agent on stage and says so, and the next thing
+        said is about it or for it. A hand with a brain is asked; any other
+        agent gets the words through the same spoken send every other request
+        uses (`_send_to`)."""
         live = await self._targets()
         target = next((t for t in live if (t.get("name") or "") == name), None)
         if not target:
@@ -1183,15 +1189,14 @@ class Manager(FrameProcessor):
             return
         self.heard += 1
         self.addressed += 1
-        note("you", text, "acted")
-        await emit(self, "addressed", p=1.0, intent="send_message", ms=0, text=text[:120], rule="named agent")
+        note(Line(Role.USER, LineKind.COMMAND, text))
+        await emit(self, "addressed", p=1.0, intent=Intent.SEND_MESSAGE.value, ms=0, text=text[:120],
+                   rule="named agent")
         self.stage = target
         await emit(self, "stage", session=target["sessionId"], goal=target.get("goal"),
                    name=target.get("name"), project=target.get("project"))
         if len(rest.split()) < 2:
-            # Only the name: open a message to it and take dictation.
-            await self._open({"kind": "agent", "sessionId": target["sessionId"], "name": name,
-                              "asks": bool(target.get("asks"))})
+            await self._say(f"{name} is listening.")
             return
         if target.get("asks"):
             # A hand with a brain is ASKED, not typed into: "Director, what's
@@ -1200,15 +1205,7 @@ class Manager(FrameProcessor):
             await self._ask_brain(target, rest)
             return
         await self._earcon("listening")
-        try:
-            message = await self._brain.compose_message(rest, exchange_lines(6))
-        except Exception as e:  # noqa: BLE001 — the words themselves are a fine message
-            logger.warning(f"compose failed, sending the words as heard: {e}")
-            message = ""
-        message = message.strip() or rest
-        await emit(self, "speaking", voice="manager", text=f"message: {message[:160]}")
-        note("Tranquility", f"(typing into {name}) {message}", "acted")
-        await self._send(target["sessionId"], message)
+        await self._send_to(target, rest)
 
     async def _brief(self, session_id: str) -> dict | None:
         code, out = await _run(TBASE, "brief", session_id, "--json")
