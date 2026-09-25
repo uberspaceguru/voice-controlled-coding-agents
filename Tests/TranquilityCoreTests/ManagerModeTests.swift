@@ -31,6 +31,16 @@ final class ManagerModeTests: XCTestCase {
                        "the manager only hands a turn to a host that says it can speak on the card")
     }
 
+    /// The manager asked the hand; the app speaks its answer on the hand's card.
+    func testAnAnswerForARightHandsCardParses() throws {
+        let line = #"{"event":"answer","session":"ac03daf5","name":"Director","text":"Ahmed, nine things need you."}"#
+        let e = try XCTUnwrap(ManagerEvent.parse(Data(line.utf8)))
+        XCTAssertEqual(e.event, .answer)
+        XCTAssertEqual(e.text, "Ahmed, nine things need you.")
+        XCTAssertNil(ManagerConfig.environment(base: [:])["TB_DEFAULT_INTERLOCUTOR"],
+                     "only Tranquility Base Director talks to Director by default")
+    }
+
     func testReadyParses() throws {
         XCTAssertEqual(try XCTUnwrap(ManagerEvent.parse(Data(#"{"event":"ready"}"#.utf8))).event, .ready)
     }

@@ -49,6 +49,11 @@ public struct ManagerEvent: Codable, Equatable, Sendable {
         /// the hand's. The app asks the hand's brain and speaks the answer on
         /// that hand's card. Sent only to a host that sets TB_RIGHT_HAND_CARDS.
         case ask
+        /// A right-hand's answer, asked by the manager, for the app to speak
+        /// on that hand's card (25 Sep): `session`, `name`, `text`. The
+        /// manager mutes its mic for the line's length; the card's voice is
+        /// echo there.
+        case answer
     }
     public var event: Kind
     public var t: Double?
@@ -183,6 +188,9 @@ public enum ManagerConfig {
         // the manager hands it "Director, …", "Yobi1, …" (`ManagerEvent.ask`)
         // instead of answering in its own voice (25 Sep).
         env["TB_RIGHT_HAND_CARDS"] = "1"
+        // Hands-free in Tranquility Base Director talks to Director by default
+        // (25 Sep): every utterance goes to `director ask`, in one thread.
+        if AppIdentity.channel == .director { env["TB_DEFAULT_INTERLOCUTOR"] = "director" }
         // An app with its own data folder hands it to the child, so the
         // `tbase` it runs reads this app's store and never Prod's (25 Sep).
         if AppIdentity.supportFolderName != nil {

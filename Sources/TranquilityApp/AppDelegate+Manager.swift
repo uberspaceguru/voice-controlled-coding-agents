@@ -703,6 +703,11 @@ extension AppDelegate {
             // The bot is ending the session before Cloud's cap, at a moment
             // with nothing open; the socket's end reconnects. Say nothing.
             break
+        case .answer:
+            // The manager asked the hand; the answer is spoken on its card.
+            guard let session = e.session, let text = e.text, !text.isEmpty else { break }
+            let name = RightHands.hand(for: session)?.name ?? e.name ?? "Director"
+            speakOnCard(text, as: session, name: name)
         case .ask:
             // "Yobi1, what's on today?" (25 Sep): the hand's brain answers and
             // the answer is spoken on the hand's own card, as a tapped reply is.
