@@ -695,7 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 store: store,
                 summarizer: SummarizerChain(providers: [managed, AnthropicSummaryProvider(), DeterministicSummarizer()]),
                 localSummaryOriginId: ManagedCredits.originId(),
-                speech: SpeechChain(preferred: premiumVoice),
+                speech: SpeechChain(preferred: premiumVoice, cloudOnly: AppIdentity.channel == .director),
                 remoteTransport: poller.map { p in
                     RemoteDispatchTransport(
                         registry: registry,

@@ -135,6 +135,29 @@ final class LocalVoiceRoutingTests: XCTestCase {
                         "a silent downgrade is exactly what `degraded` exists to surface")
     }
 
+    /// Tranquility Base Director has one voice (25 Sep, tb-address-gate): a
+    /// line the cloud cannot render is left on screen as text, never read in
+    /// the slower system voice, and a short line is the cloud's like any other.
+    func testCloudOnlyNeverReachesTheSystemVoice() async {
+        let cloud = RecordingProvider(name: "cloud")
+        cloud.fails = true
+        let local = RecordingProvider(name: "local")
+        let chain = SpeechChain(preferred: cloud, fallback: local, cloudOnly: true)
+        let spoken = await chain.speak(sanitized("Noted."), voice: "CwhRBWXzGAHq8TQ4Fs17",
+                                       systemVoice: "com.apple.voice.premium.en-US.Ava")
+        XCTAssertEqual(cloud.askedCount, 1)
+        XCTAssertEqual(local.askedCount, 0, "text only: no second voice")
+        XCTAssertFalse(spoken.completed)
+        XCTAssertNotNil(spoken.failure)
+
+        let legacy = RecordingProvider(name: "cloud")
+        let local2 = RecordingProvider(name: "local")
+        _ = await SpeechChain(preferred: legacy, fallback: local2, cloudOnly: true)
+            .speak(sanitized("Noted."), voice: "com.apple.voice.premium.en-US.Ava")
+        XCTAssertEqual(legacy.askedCount, 1, "a session with only a system voice still speaks in the cloud")
+        XCTAssertEqual(local2.askedCount, 0)
+    }
+
     // MARK: - The discriminator
 
     /// `isSystemVoice` is a prefix test, so it is only as good as its coverage

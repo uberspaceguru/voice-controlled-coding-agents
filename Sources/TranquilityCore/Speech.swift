@@ -747,6 +747,11 @@ public struct SpeechChain: Sendable {
     let generation = Generation()
     public let preferred: (any SpeechProvider)?
     public let fallback: any SpeechProvider
+    /// One voice (25 Sep, tb-address-gate): every line goes through the cloud
+    /// voice, however short, and when it cannot render the line is left on
+    /// screen as text rather than read in the system voice. On in Tranquility
+    /// Base Director, where a second, slower voice was the complaint.
+    public let cloudOnly: Bool
     /// Shared by every path that speaks, so a clip rendered by `prewarm` is the
     /// same object `speak` finds. Lives on the chain rather than the provider
     /// because the chain is what both the announcement and the ⌃⌃ ladder hold.
@@ -757,10 +762,12 @@ public struct SpeechChain: Sendable {
         // Bare: the provider resolves the preferred voice per utterance, so a voice
         // chosen from the menu takes effect on the next announcement rather than the
         // next launch.
-        fallback: any SpeechProvider = SystemSpeechProvider()
+        fallback: any SpeechProvider = SystemSpeechProvider(),
+        cloudOnly: Bool = false
     ) {
         self.preferred = preferred
         self.fallback = fallback
+        self.cloudOnly = cloudOnly
     }
 
     /// Render an utterance now so a later `speak` of the SAME text in the SAME
@@ -883,7 +890,7 @@ public struct SpeechChain: Sendable {
         //
         // Not a preference and not sticky: once the migration re-mints the pair,
         // `cloudVoice` is present and the cloud is used like everywhere else.
-        let sessionHasNoCloudVoice = cloudVoice == nil && ownSystemVoice != nil
+        let sessionHasNoCloudVoice = cloudVoice == nil && ownSystemVoice != nil && !cloudOnly
         var degraded: String?
         var degradedReason: FallbackReason?
         var heardAny = false
@@ -959,6 +966,11 @@ public struct SpeechChain: Sendable {
             // would speak an announcement that was cancelled several seconds ago.
             ElevenLabsSpeechProvider.trace?("chain: stopped before fallback; staying silent")
             return Spoken(provider: "none", completed: false, heardAny: heardAny)
+        }
+        if cloudOnly {
+            ElevenLabsSpeechProvider.trace?("chain: cloud voice failed (\(degraded ?? "unavailable")); text only, no second voice")
+            return Spoken(provider: "none", completed: false,
+                          failure: degraded ?? "cloud voice unavailable", heardAny: heardAny)
         }
         ElevenLabsSpeechProvider.trace?("chain: falling back to \(fallback.name)")
         do {
