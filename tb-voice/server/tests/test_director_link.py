@@ -238,6 +238,23 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c.args[1:3] if c.args[1] == "ask" else c.args[1:] for c in run.await_args_list],
                          [("ask", "What needs me?"), ("what's my day?",)], "one ask each, the second to Yobi1")
 
+    async def test_one_voice_silence_is_silence_and_a_failure_is_said_once(self):
+        from unittest.mock import AsyncMock, patch
+        self.m._card_secs = lambda reply: 0
+        self.m.FALLBACK_AFTER = 0
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        with patch.dict(os.environ, env), patch("manager.emit", AsyncMock()) as emit:
+            with patch("manager._run", AsyncMock(return_value=(0, ""))):
+                await self.m._dialogue_turn("Did you have some of the rice? You need carbs.", None, None)
+            self.assertEqual([c for c in emit.await_args_list if c.args[1:] == ("answer",)], [],
+                             "the room's talk: Director says nothing, and so does everyone else")
+            with patch("manager._run", AsyncMock(return_value=(1, "boom"))):
+                await self.m._dialogue_turn("what needs me?", None, None)
+                await self.m._dialogue_turn("what needs me?", None, None)
+        self.m._say.assert_not_awaited()
+        said = [c.kwargs["text"] for c in emit.await_args_list if c.args[1:] == ("answer",)]
+        self.assertEqual(said, ["Director didn't answer just now."], "once a minute, on the card, in its voice")
+
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)
         self.assertEqual(self.m._say.await_args.args[0], "TeamChat Manager isn't connected yet.")

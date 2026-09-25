@@ -618,6 +618,27 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             await emit(self, "answer", session=hand["session"], name=name, text=reply)
             await asyncio.sleep(secs)
 
+    FALLBACK_AFTER = 6.0      # seconds from the ask before a failure is said
+    FALLBACK_EVERY = 60.0     # at most one "didn't answer" a minute
+
+    async def _hand_failed(self, hand: dict, name: str, asked: float):
+        """A hand that failed (an error, a timeout) is said to have, once a
+        minute at most, never sooner than FALLBACK_AFTER from the ask, and in
+        the card's voice when the host has cards, so hands-free has one voice."""
+        now = time.monotonic()
+        if now - getattr(self, "_last_fallback", -1e9) < self.FALLBACK_EVERY:
+            return
+        if now - asked < self.FALLBACK_AFTER:
+            await asyncio.sleep(self.FALLBACK_AFTER - (now - asked))
+            self._require_current()
+        self._last_fallback = time.monotonic()
+        line = f"{name} didn't answer just now."
+        import director_link
+        if director_link.cards_host() and hand.get("session"):
+            await self._answer_on_card(hand, name, line)
+        else:
+            await self._say(line, response_mode="receipt")
+
     async def _relay_hand(self, name: str, words: str, text: str):
         """'Director, …', 'Yobi1, …', 'Sys-3PO, …': the hand answers, never this
         voice. Its `ask` runs here (Director's in the session's one thread, so
@@ -637,12 +658,21 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                 else await self._relay_director(text)
             return
         await emit(self, "tool", argv=[name, words[:80]], meaning=f"asking {name}")
+        asked = time.monotonic()
         code, out = await _run(*argv, timeout=60)
         self._require_current()
         reply = director_link.flatten(out) if code == 0 else ""
+        if code == 0 and not reply:
+            # A clean exit with nothing to say is the hand choosing silence:
+            # in Director's hands-free every utterance reaches it, the room's
+            # talk included ("Did you have some of the rice?"), and nothing is
+            # its answer. Saying "didn't answer" over it was a second voice
+            # (25 Sep, tb-one-voice).
+            note(name, "(nothing: not addressed to it)", "silent")
+            return
         if not reply:
             logger.error(f"{name} ask failed ({code}): {out[-300:]}")
-            await self._say(f"{name} didn't answer just now.", response_mode="receipt")
+            await self._hand_failed(hand, name, asked)
             return
         note(name, reply, "spoken")
         if director_link.cards_host():
