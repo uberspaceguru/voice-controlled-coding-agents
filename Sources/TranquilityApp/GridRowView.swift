@@ -79,11 +79,21 @@ final class GridRowView: NSControl {
         // have heard it, and a gone row is a grey socket, a different colour
         // entirely. It is also the oldest unread idiom there is — a solid dot
         // that hollows out once you have looked.
-        let hollow = item.read == .opened && item.lamp.asksForYou
+        //
+        // A right-hand's pinned row says three things only (25 Sep, Ahmed:
+        // "the little indicators that say this agent is waiting on me
+        // matter"): solid green when something waits on him, a hollow blue
+        // ring when its work is moving, and no dot at all when it is quiet.
+        // `GridRows.handRow` hands those over as .ready, .working, .running.
+        let handMoving = item.pinned && item.lamp == .working
+        let handQuiet = item.pinned && item.lamp == .running
+        let hollow = (item.read == .opened && item.lamp.asksForYou) || handMoving
         lampLayer = lamp.layer
-        lamp.layer?.backgroundColor = hollow ? NSColor.clear.cgColor : item.lamp.fill.cgColor
+        lamp.layer?.backgroundColor = (hollow || handQuiet) ? NSColor.clear.cgColor : item.lamp.fill.cgColor
         lamp.layer?.cornerRadius = Lamp.diameter / 2
-        if hollow {
+        if handQuiet {
+            lamp.layer?.borderWidth = 0
+        } else if hollow {
             // 1.5pt, not the quiet ring's 1pt: at 9px a hairline ring reads as
             // a smudge rather than a deliberate outline.
             lamp.layer?.borderWidth = 1.5

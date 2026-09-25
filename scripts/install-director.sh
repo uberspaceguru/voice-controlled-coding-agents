@@ -94,24 +94,34 @@ find "$SUPPORT" -maxdepth 1 -type f -exec chmod 600 {} + 2>/dev/null || true
 # roster is never touched. Run through python3: the app keeps every file in
 # its folder at 600 (PrivateStorage), so the scripts are never executable there.
 mkdir -p "$SUPPORT/brains"
-cp -p scripts/brains/yobi1-ask scripts/brains/sys3po-ask "$SUPPORT/brains/"
+cp -p scripts/brains/yobi1-ask scripts/brains/sys3po-ask scripts/brains/hand-status "$SUPPORT/brains/"
 chmod 700 "$SUPPORT/brains" "$SUPPORT/brains/"*
 if [ -f "$SUPPORT/right-hands.json" ]; then
   python3 - "$SUPPORT/right-hands.json" "$SUPPORT/brains" <<'PY2'
 import json, sys
 path, brains = sys.argv[1], sys.argv[2]
 data = json.load(open(path))
-asks = {"Yobi1": ["/usr/bin/python3", f"{brains}/yobi1-ask", "{text}"],
-        "Sys-3PO": ["/usr/bin/python3", f"{brains}/sys3po-ask", "{text}"]}
+py = "/usr/bin/python3"
+status = [py, f"{brains}/hand-status", "--session", "{session}", "--name"]
+wanted = {  # (hand, key) -> argv; the card's status (tb-indicators) and the brain
+    ("Yobi1", "ask"): [py, f"{brains}/yobi1-ask", "{text}"],
+    ("Sys-3PO", "ask"): [py, f"{brains}/sys3po-ask", "{text}"],
+    ("Yobi1", "projects"): status + ["Yobi1"],
+    ("Sys-3PO", "projects"): status + ["Sys-3PO", "--health"],
+    ("Director", "ready"): ["director", "--json", "ready"],
+}
 given = []
 for hand in data.get("hands", []):
-    ours = any(brains in str(a) for a in hand.get("ask") or [])
-    if hand.get("name") in asks and (not hand.get("ask") or ours) and hand.get("ask") != asks[hand["name"]]:
-        hand["ask"] = asks[hand["name"]]
-        given.append(hand["name"])
+    for (name, key), argv in wanted.items():
+        if hand.get("name") != name:
+            continue
+        ours = any(brains in str(a) for a in hand.get(key) or [])
+        if (not hand.get(key) or ours) and hand.get(key) != argv:
+            hand[key] = argv
+            given.append(f"{name} {key}")
 if given:
     json.dump(data, open(path, "w"), indent=2)
-    print("  roster: gave " + " and ".join(given) + " an ask")
+    print("  roster: set " + ", ".join(given))
 PY2
 fi
 

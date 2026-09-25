@@ -76,7 +76,7 @@ final class RightHandsPanelTests: XCTestCase {
         let lamp = Dictionary(rows.filter(\.pinned).map { ($0.name, $0.lamp) }, uniquingKeysWith: { a, _ in a })
         XCTAssertEqual(lamp["Director"], .ready, "Director's card says five things need him")
         XCTAssertEqual(lamp["Yobi1"], .ready, "a turn waiting is something for him")
-        XCTAssertEqual(lamp["Sys-3PO"], .running, "idle is a hollow dot")
+        XCTAssertEqual(lamp["Sys-3PO"], .running, "idle is quiet: no dot (GridRowView draws a pinned .running as nothing)")
         XCTAssertEqual(lamp["TeamChat Manager"], .unlit, "a placeholder is greyed")
         for row in rows where row.pinned && row.lamp == .ready {
             XCTAssertEqual(row.read, .unread, "\(row.name): a dot is solid; an opened green draws as a ring")
@@ -101,9 +101,9 @@ final class RightHandsPanelTests: XCTestCase {
         XCTAssertEqual(grid.map(\.name), [
             "Director", "5 things need you",
             "Wispr: Decision on the insertion fix", "Memory: Which store to keep", "To-do list",
-            "more…", "Yobi1", "Sys-3PO", "TeamChat Manager"])
+            "1 more…", "Yobi1", "Sys-3PO", "TeamChat Manager"])
         XCTAssertEqual(grid[1].parentId, director)
-        XCTAssertEqual(grid[2].lamp, .running, "a line is not an agent: no status dot (25 Sep)")
+        XCTAssertEqual(grid[2].lamp, .ready, "a waiting line wears the waiting glyph (NestedRowView), not an agent's lamp")
         XCTAssertEqual(grid[2].read, .none)
         XCTAssertEqual(grid[5].lamp, .running)
         for line in grid[1...5] {
@@ -178,19 +178,19 @@ final class RightHandsPanelTests: XCTestCase {
         let rows = RightHands.Accordion.rows(parent: director, card: card,
                                              said: "Ahmed, seven things need you; first, Code hygiene.")
         XCTAssertEqual(rows.map(\.name), [
-            "Ahmed, seven things need you; first, Code hygiene.",
+            "Seven things need you: approval for TypeSafe, a model for TeamChat iOS, one more.",
             "Code hygiene: approval needed to send private repository\u{2026}",
             "TeamChat: switch model for TeamChat iOS?",
             "React web app: switch model for React parity?",
-            "more\u{2026}"])
+            "3 more\u{2026}"])
         XCTAssertEqual(RightHands.Accordion.rows(parent: director, card: card).first?.name,
-                       card.panelSummary, "without a said sentence, Director's panel summary")
+                       card.panelSummary, "Director's needs summary, which counts the lines below")
     }
 
     func testMoreRevealsWhatDirectorNumbersAndThenIsGone() throws {
         let card = try XCTUnwrap(RightHands.Rollup.parse(Data(status.utf8)))
         let all = RightHands.Accordion.rows(parent: director, card: card, all: true)
-        XCTAssertEqual(all.count, 1 + RightHands.Accordion.most, "the summary and five lines")
+        XCTAssertEqual(all.count, 1 + 6, "the summary and every waiting line: the count is the count of dots")
         XCTAssertFalse(all.contains { $0.name == "more\u{2026}" }, "nothing more to show")
     }
 

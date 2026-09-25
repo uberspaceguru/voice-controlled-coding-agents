@@ -322,14 +322,42 @@ public extension GridAssembler {
     /// it is not running yet.
     static func handRow(id: String, existing: SessionRow?, input: RowInputs) -> SessionRow? {
         let name = input.handNames[id] ?? input.brains[id] ?? existing?.name ?? id
-        if let brain = input.brains[id] {
-            let dot = (input.cards[id]?.needsYou ?? 0) > 0
-            // The dot is SOLID: a green lamp the grid has seen opened draws as a
-            // ring (GridRowView, "a solid dot that hollows out once you have
-            // looked"), and a right-hand's dot means "needs me" until it does not.
-            return SessionRow(id: id, name: brain, aux: "", lamp: dot ? .ready : .running,
-                              revivable: false, read: dot ? .unread : .none,
-                              detail: input.cards[id].map { RightHands.Accordion.summary($0) },
+        let card = input.cards[id]
+        // Three states and no more (25 Sep, tb-indicators): FILLED when
+        // something waits on the user, HOLLOW when work is moving, NOTHING
+        // when quiet. A hand with a card (Director's needs list, or its own
+        // `hand-status`) is its card and nothing else; a hand without one yet
+        // is its session, lit by its own turns or by Director's word (an app
+        // with no hooks of its own has no waiting turns to light a dot).
+        let indicator: RightHands.Rollup.Indicator
+        if let card {
+            indicator = RightHands.Rollup.indicator(card)
+        } else if input.brains[id] != nil {
+            // A hand with a brain speaks through its card; before the first
+            // card arrives there is nothing to claim.
+            indicator = .quiet
+        } else {
+            let directorSays = input.cards.values.contains { $0.needsSessions.contains(id) }
+            let directorWorking = input.cards.values.contains { $0.workingSessions.contains(id) }
+            indicator = RightHands.Rollup.indicator(
+                nil, sessionAsks: (existing?.lamp.asksForYou ?? false) || directorSays,
+                sessionWorking: existing?.lamp == .working || directorWorking)
+        }
+        // The pinned lamp vocabulary (GridRowView): .ready solid is "needs
+        // you" and stays solid until it does not (never the grid's "hollows
+        // once looked"); .working is drawn as a hollow ring; .running as no
+        // dot at all; .unlit is a hand that is not there yet, greyed.
+        let lamp: Lamp
+        switch indicator {
+        case .needsYou: lamp = .ready
+        case .moving: lamp = .working
+        case .quiet: lamp = .running
+        }
+        let read: ReadState = indicator == .needsYou ? .unread : .none
+        if input.brains[id] != nil || (card != nil && existing == nil) {
+            return SessionRow(id: id, name: name, aux: "", lamp: lamp,
+                              revivable: false, read: read,
+                              detail: card.map { RightHands.Accordion.summaryText($0) },
                               hasRecordedTurn: true)
                 .placed(pinned: true)
         }
@@ -339,15 +367,11 @@ public extension GridAssembler {
                 .placed(pinned: true)
         }
         if row.switchedOff { return row }
-        // Director's word counts as "needs me" too: an app with no hooks of
-        // its own has no waiting turns to light a dot, and Director watches
-        // every session.
-        let directorSays = input.cards.values.contains { $0.needsSessions.contains(row.id) }
-        let lamp: Lamp = (row.lamp.asksForYou || directorSays) ? .ready
-            : (row.lamp == .unlit ? .unlit : .running)
-        return SessionRow(id: row.id, name: name, aux: "", lamp: lamp, revivable: row.revivable,
-                          read: lamp == .ready ? .unread : row.read,
-                          detail: row.detail ?? row.aux, harness: row.harness,
+        let shown: Lamp = (row.lamp == .unlit && indicator == .quiet) ? .unlit : lamp
+        return SessionRow(id: row.id, name: name, aux: "", lamp: shown, revivable: row.revivable,
+                          read: shown == .ready ? .unread : .none,
+                          detail: card.map { RightHands.Accordion.summaryText($0) } ?? row.detail ?? row.aux,
+                          harness: row.harness,
                           door: row.door, hasRecordedTurn: row.hasRecordedTurn,
                           lastActivity: row.lastActivity)
             .placed(pinned: true)

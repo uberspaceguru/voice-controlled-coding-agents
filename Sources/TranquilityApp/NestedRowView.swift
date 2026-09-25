@@ -6,7 +6,11 @@ import TranquilityCore
 /// expanded items look like agent rows").
 ///
 /// - indented under the hand's name, in smaller type;
-/// - no status lamp: an item wears a small chevron, the summary nothing;
+/// - no status lamp: an item wears one small glyph for what it is (25 Sep,
+///   tb-indicators): ● waiting on you (the hand's green, and the only kind
+///   the summary counts), ◆ ready for you to look at, ◌ blocked on another
+///   agent; a line that is only moving keeps the chevron. The summary wears
+///   nothing;
 /// - the summary is Director's own sentence, full width, up to two lines;
 /// - an item is one line, cut at a word;
 /// - "more…" is a button, not a row (`MoreButton` below).
@@ -37,7 +41,7 @@ final class NestedRowView: NSControl {
         self.action = action
         identifier = NSUserInterfaceItemIdentifier(item.id)
         translatesAutoresizingMaskIntoConstraints = false
-        toolTip = item.detail ?? item.name
+        toolTip = kind == .item ? Self.glyph(for: item.lamp).meaning + ": " + item.name : (item.detail ?? item.name)
 
         label.font = Self.font
         label.textColor = resting
@@ -58,10 +62,12 @@ final class NestedRowView: NSControl {
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: kind == .summary ? -6 : -5),
         ]
         if kind == .item {
-            // A chevron, in the hint ink, where a lamp would be on an agent row.
-            let chevron = NSTextField(labelWithString: "›")
-            chevron.font = Self.font
-            chevron.textColor = StateLegend.Palette.hint
+            // The item's glyph, where a lamp would be on an agent row.
+            let mark = Self.glyph(for: item.lamp)
+            let chevron = NSTextField(labelWithString: mark.glyph)
+            chevron.font = mark.glyph == "›" ? Self.font : ChromeType.mono(ofSize: 9, weight: .regular)
+            chevron.textColor = mark.ink
+            chevron.setAccessibilityLabel(mark.meaning)
             chevron.translatesAutoresizingMaskIntoConstraints = false
             addSubview(chevron)
             constraints += [
@@ -80,6 +86,16 @@ final class NestedRowView: NSControl {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// An item's kind arrives as its lamp (`RightHands.Accordion.lamp(for:)`).
+    static func glyph(for lamp: Lamp) -> (glyph: String, ink: NSColor, meaning: String) {
+        switch lamp {
+        case .ready: return (StateLegend.Glyph.dot, StateLegend.Palette.ready, "Waiting on you")
+        case .working: return ("◆", StateLegend.Palette.working, "Ready for you to look at")
+        case .running: return (StateLegend.Glyph.quiet, StateLegend.Palette.hint, "Blocked on another agent")
+        default: return (StateLegend.Glyph.forward, StateLegend.Palette.hint, "Moving")
+        }
+    }
 
     /// The width the label wraps at, once the row knows its own width; and an
     /// item, which is one line, is cut at its last whole word that fits.

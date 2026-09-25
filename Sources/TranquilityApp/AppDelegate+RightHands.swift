@@ -48,12 +48,18 @@ extension AppDelegate {
             // Director's own sentence (25 Sep): asked in the card's thread, which
             // also renumbers the list "number 2" binds to, and shown and spoken
             // exactly as it came back. Never a summary of it.
+            // The "what needs me?" ask binds Director's numbered list for this
+            // thread, so it is asked whenever the card carries that list (or
+            // has no sentence of its own). What is SPOKEN is the card's own
+            // summary first (25 Sep, tb-indicators): it counts exactly the
+            // filled lines drawn below, so the ear and the dots agree.
             var said: String?
-            if hand.asks, case .success(let line) = RightHands.ask(
+            if hand.asks, card?.panelLines.isEmpty == false || card?.panelSummary == nil,
+               case .success(let line) = RightHands.ask(
                 hand, text: "what needs me?", conversation: id, session: id) {
                 said = line
             }
-            let line = said ?? card?.panelSummary
+            let line = card?.panelSummary ?? said
             RightHands.CardCache.shared.putSaid(line, for: id)
             await MainActor.run { [weak self] in
                 guard let self, self.expandedHand == id else { return }
@@ -76,28 +82,26 @@ extension AppDelegate {
         switch part {
         case .item(let n):
             guard let card = RightHands.CardCache.shared.card(for: parent) else { return }
-            let lines = RightHands.Accordion.lines(card)
+            let lines = RightHands.Accordion.expanded(card)
             guard n >= 1, n <= lines.count else { return }
-            Permissions.log("right-hands: \(name) item \(n) (\(lines[n - 1])) opened")
-            // Director's own lines are asked about by number: they are the
-            // list Director numbered for this thread when the hand opened.
-            if !card.panelLines.isEmpty, RightHands.hand(for: parent)?.asks == true {
+            let item = lines[n - 1]
+            Permissions.log("right-hands: \(name) item \(n) (\(item.kind.rawValue): \(item.line)) opened")
+            // Director's waiting lines are asked about by number: they are the
+            // list Director numbered for this thread when the hand opened, and
+            // it numbers five. Tap-to-explain (25 Sep): the hand explains the
+            // item in plain words and it is then in focus in the thread, so a
+            // "yes" said next answers it; if the hand cannot answer, the card
+            // reads the line instead of going quiet.
+            if !card.panelLines.isEmpty, item.kind == .waiting, n <= RightHands.Accordion.most,
+               RightHands.hand(for: parent)?.asks == true {
                 askBrain(RightHands.Accordion.explainRequest(number: n), of: parent, name: name,
-                         fallback: lines[n - 1])
+                         fallback: item.line)
                 return
             }
-            guard n <= card.projects.count else { return }
-            let project = card.projects[n - 1]
-            // Tap-to-explain (25 Sep): the hand explains the item in plain
-            // words, and the item is then in focus in its thread, so a "yes"
-            // said next answers it. If the hand cannot answer, the card reads
-            // the item's own line instead of going quiet.
-            if RightHands.hand(for: parent)?.asks == true {
-                askBrain(RightHands.Accordion.explainRequest(project), of: parent, name: name,
-                         fallback: RightHands.Accordion.itemSentence(project))
-            } else {
-                speakOnCard(RightHands.Accordion.itemSentence(project), as: parent, name: name)
-            }
+            // Anything else is read as drawn: a ready or blocked line, a sixth
+            // waiting line Director never numbered, a line from a hand's own
+            // status. Asking a brain about a line it did not write guesses.
+            speakOnCard(item.line, as: parent, name: name)
         case .more:
             // More shows more (25 Sep: a button that reveals the rest of the
             // list, up to what Director numbers), and says nothing.

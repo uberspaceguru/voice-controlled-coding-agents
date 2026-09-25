@@ -55,10 +55,14 @@ public enum RightHands {
         /// `["director", "ask", "{text}", "--channel", "tranquility", "--external-id", "{conversation}"]`.
         /// Its stdout, trimmed, is the line the hand speaks back.
         public var ask: [String]?
+        /// A command that prints what is ready for the user to look at
+        /// (`["director", "--json", "ready"]`, 25 Sep): its items join the
+        /// card as "ready" lines, never counted as needing the user.
+        public var ready: [String]?
 
         public init(name: String? = nil, session: String? = nil, cwd: String? = nil,
                     tmux: String? = nil, rollup: String? = nil,
-                    projects: [String]? = nil, ask: [String]? = nil) {
+                    projects: [String]? = nil, ask: [String]? = nil, ready: [String]? = nil) {
             self.name = name
             self.session = session
             self.cwd = cwd
@@ -66,6 +70,7 @@ public enum RightHands {
             self.rollup = rollup
             self.projects = projects
             self.ask = ask
+            self.ready = ready
         }
 
         /// A hand named in the file with nothing to find it by yet: "TeamChat
@@ -278,7 +283,8 @@ public enum RightHands {
                 hands.append(Hand(name: string("name"), session: string("session"),
                                   cwd: string("cwd"), tmux: string("tmux"),
                                   rollup: string("rollup"),
-                                  projects: argv("projects"), ask: argv("ask")))
+                                  projects: argv("projects"), ask: argv("ask"),
+                                  ready: argv("ready")))
             } else {
                 return .failure(.wrongShape("entry \(index) is neither an object nor a string"))
             }
@@ -395,7 +401,10 @@ public enum RightHands {
                                 run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
                                     Subprocess.run($0, $1, timeout: $2)
                                 }) -> Rollup? {
-        guard let argv = hand.projects, !argv.isEmpty, let program = executable(argv[0]) else { return nil }
+        guard let template = hand.projects, !template.isEmpty else { return nil }
+        let session = hand.session ?? ""
+        let argv = template.map { $0.replacingOccurrences(of: "{session}", with: session) }
+        guard let program = executable(argv[0]) else { return nil }
         guard case .success(let out) = run(program, Array(argv.dropFirst()), timeout) else {
             trace?("right-hands: \(argv.joined(separator: " ")) failed; the card falls back")
             return nil
@@ -405,7 +414,13 @@ public enum RightHands {
 
     /// The card for a hand: its `projects` command, else its rollup file.
     public static func card(for hand: Hand) -> Rollup? {
-        if hand.projects?.isEmpty == false, let rollup = projects(hand) { return rollup }
+        if hand.projects?.isEmpty == false, var rollup = projects(hand) {
+            if let ready = hand.ready, !ready.isEmpty, let program = executable(ready[0]),
+               case .success(let out) = Subprocess.run(program, Array(ready.dropFirst()), timeout: 20) {
+                rollup.items += Rollup.readyItems(Data(out.utf8))
+            }
+            return rollup
+        }
         guard let path = hand.rollup else { return nil }
         return Rollup.load(path: (path as NSString).expandingTildeInPath)
     }
@@ -499,9 +514,42 @@ public enum RightHands {
         public var panelSummary: String?
         public var panelLines: [String]
 
+        /// One line under an open hand, and what it is (25 Sep, Ahmed: "the
+        /// little indicators that say this agent is waiting on me matter").
+        /// Only `waiting` is counted and only `waiting` is said; `ready` and
+        /// `blocked` are shown with their own glyph and never spoken.
+        public struct Item: Equatable, Sendable {
+            public enum Kind: String, Sendable {
+                /// Waiting on you: the hand's dot, and the summary's count.
+                case waiting
+                /// Finished work ready for you to look at.
+                case ready
+                /// Blocked on another agent (or on Director), not on you.
+                case blocked
+                /// A project that is only moving (the older rollup shape).
+                case moving
+            }
+            public var line: String
+            public var kind: Kind
+            public init(line: String, kind: Kind) {
+                self.line = line
+                self.kind = kind
+            }
+        }
+        /// The lines in the order they are drawn: waiting, then ready, then
+        /// blocked. Empty for the older rollup shape, which `Accordion.entries`
+        /// reads from `projects` instead.
+        public var items: [Item]
+        /// Work is moving: the hand's row wears a hollow dot when nothing
+        /// needs the user.
+        public var moving: Bool
+        /// The sessions Director says are working, by session id.
+        public var workingSessions: Set<String>
+
         public init(projects: [Project], updatedAt: String? = nil, totals: String? = nil,
                     needsYou: Int? = nil, needsSessions: Set<String> = [],
-                    panelSummary: String? = nil, panelLines: [String] = []) {
+                    panelSummary: String? = nil, panelLines: [String] = [],
+                    items: [Item] = [], moving: Bool? = nil, workingSessions: Set<String> = []) {
             self.projects = projects
             self.updatedAt = updatedAt
             self.totals = totals
@@ -509,6 +557,47 @@ public enum RightHands {
             self.needsSessions = needsSessions
             self.panelSummary = panelSummary
             self.panelLines = panelLines
+            self.items = items
+            self.moving = moving ?? projects.contains { $0.state == .moving }
+            self.workingSessions = workingSessions
+        }
+
+        /// A hand's row, in three states and no more (25 Sep): filled when
+        /// something waits on the user, hollow when work is moving, nothing
+        /// when quiet. Filled wins; the same truth as the spoken sentence.
+        public enum Indicator: Equatable, Sendable { case needsYou, moving, quiet }
+
+        public static func indicator(_ card: Rollup?, sessionAsks: Bool = false,
+                                     sessionWorking: Bool = false) -> Indicator {
+            if (card?.needsYou ?? 0) > 0 || sessionAsks { return .needsYou }
+            if card?.moving == true || sessionWorking { return .moving }
+            return .quiet
+        }
+
+        /// `director --json ready` read as "ready" lines: each item's title,
+        /// cut at a word, in Director's order.
+        public static func readyItems(_ data: Data) -> [Item] {
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let raw = object["items"] as? [[String: Any]] else { return [] }
+            return raw.compactMap { entry in
+                guard let title = (entry["title"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
+                return Item(line: cut(title), kind: .ready)
+            }
+        }
+
+        /// At most `limit` characters, cut at a word, "…" when cut; a
+        /// trailing "ready to look at." is dropped, since the glyph says it.
+        static func cut(_ text: String, limit: Int = 60) -> String {
+            var t = text.replacingOccurrences(of: "\n", with: " ")
+            for tail in [", ready to look at.", " ready to look at.", ", ready to look at"] where t.hasSuffix(tail) {
+                t = String(t.dropLast(tail.count))
+            }
+            guard t.count > limit else { return t }
+            var head = String(t.prefix(limit))
+            if let space = head.lastIndex(of: " ") { head = String(head[..<space]) }
+            while let last = head.last, ",;:-–—".contains(last) { head.removeLast() }
+            return head + "…"
         }
 
         public static func load(path: String) -> Rollup? {
@@ -531,8 +620,32 @@ public enum RightHands {
                         .compactMap { ($0["line"] as? String) ?? ($0["full"] as? String) }
                         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }
+                    // Director's needs list is the one truth (25 Sep): its
+                    // summary counts exactly these lines, so the dot and the
+                    // count are these lines, not the needs_you group, which
+                    // is before Director's noise rules.
+                    card.needsYou = card.panelLines.count
+                    card.items = card.panelLines.map { Item(line: $0, kind: .waiting) } + card.items
                 }
                 return card
+            }
+            // A hand's own card (`hand-status`, 25 Sep):
+            // {"summary": "…", "moving": false, "items": [{"line": "…", "kind": "waiting"}]}
+            if object["projects"] == nil, let raw = object["items"] as? [[String: Any]] {
+                let items = raw.compactMap { entry -> Item? in
+                    guard let line = (entry["line"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else { return nil }
+                    let kind = Item.Kind(rawValue: (entry["kind"] as? String ?? "").lowercased()) ?? .waiting
+                    return Item(line: line, kind: kind)
+                }
+                let order: [Item.Kind] = [.waiting, .ready, .blocked, .moving]
+                let sorted = items.enumerated().sorted {
+                    (order.firstIndex(of: $0.element.kind)!, $0.offset) < (order.firstIndex(of: $1.element.kind)!, $1.offset)
+                }.map(\.element)
+                let summary = (object["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return Rollup(projects: [], needsYou: sorted.filter { $0.kind == .waiting }.count,
+                              panelSummary: summary?.isEmpty == false ? summary : nil,
+                              items: sorted, moving: object["moving"] as? Bool ?? false)
             }
             guard let raw = object["projects"] as? [[String: Any]] else { return nil }
             let projects = raw.compactMap { entry -> Project? in
@@ -591,10 +704,18 @@ public enum RightHands {
                 let n = rows(key).count
                 if n > 0 { parts.append("\(n) \(key == "needs_you" && n == 1 ? "needs you" : word)") }
             }
+            // Blocked on another agent, or on Director: shown, never counted.
+            let blocked = (rows("blocked") + rows("needs_director")).compactMap { a -> Item? in
+                guard let n = name(a) else { return nil }
+                let what = line(a)
+                return Item(line: cut(what.isEmpty ? n : "\(n): \(what)"), kind: .blocked)
+            }
             return Rollup(projects: Array(projects.prefix(limit)),
                           totals: parts.isEmpty ? nil : parts.joined(separator: ", ") + ".",
                           needsYou: rows("needs_you").count,
-                          needsSessions: Set(rows("needs_you").compactMap { $0["session_id"] as? String }))
+                          needsSessions: Set(rows("needs_you").compactMap { $0["session_id"] as? String }),
+                          items: blocked, moving: !rows("working").isEmpty,
+                          workingSessions: Set(rows("working").compactMap { $0["session_id"] as? String }))
         }
 
         /// One sentence, at most about twenty words: a worker note can be a
@@ -755,32 +876,84 @@ public enum RightHands {
                 : "\(project.name) \(state). " + Rollup.sentence(project.line)
         }
 
-        /// The lines, as rows under `parent`. A needs-you item wears the dot;
-        /// every other line is hollow. Each opens its card, which is why each
-        /// carries a recorded turn.
-        /// `said` is the sentence Director returned when the hand was opened,
-        /// shown as it came back (25 Sep: "the summary row is the sentence
-        /// Director returns"); without it, Director's panel summary, then a
-        /// count. `all` is "more…" pressed: up to `most` lines, and no button.
+        /// Every line an open hand can show, in drawing order: waiting on you,
+        /// then ready to look at, then blocked on another agent (25 Sep).
+        /// Director's needs list, when it sent one, is the whole of "waiting";
+        /// the older rollup shape is read from its projects.
+        public static func entries(_ card: Rollup) -> [Rollup.Item] {
+            var all = card.items
+            if card.panelSummary == nil, !all.contains(where: { $0.kind == .waiting }) {
+                all = card.projects.map { p in
+                    let line = p.line.isEmpty ? p.name : "\(p.name): \(p.line)"
+                    switch p.state {
+                    case .needsYou: return Rollup.Item(line: line, kind: .waiting)
+                    case .ready: return Rollup.Item(line: line, kind: .ready)
+                    case .moving: return Rollup.Item(line: line, kind: .moving)
+                    }
+                } + all
+            }
+            let order: [Rollup.Item.Kind] = [.waiting, .ready, .blocked, .moving]
+            return all.enumerated().sorted {
+                (order.firstIndex(of: $0.element.kind)!, $0.offset) < (order.firstIndex(of: $1.element.kind)!, $1.offset)
+            }.map(\.element)
+        }
+
+        /// What "more…" opens to: every line waiting on you, so the count in
+        /// the summary is the count of filled lines, and at most two each of
+        /// the rest; `longest` rows in all.
+        public static let longest = 12
+        public static let othersShown = 2
+        public static func expanded(_ card: Rollup) -> [Rollup.Item] {
+            var out: [Rollup.Item] = []
+            var others: [Rollup.Item.Kind: Int] = [:]
+            for item in entries(card) where out.count < longest {
+                if item.kind == .waiting { out.append(item); continue }
+                let n = others[item.kind, default: 0]
+                if n < othersShown { out.append(item); others[item.kind] = n + 1 }
+            }
+            return out
+        }
+
+        /// The lamp an item row wears, which `NestedRowView` draws as its
+        /// glyph: waiting is the hand's own green, ready is advisory blue,
+        /// blocked is a quiet socket, and a merely moving project has none.
+        public static func lamp(for kind: Rollup.Item.Kind) -> Lamp {
+            switch kind {
+            case .waiting: return .ready
+            case .ready: return .working
+            case .blocked: return .running
+            case .moving: return .unlit
+            }
+        }
+
+        /// The sentence the summary row shows. Director's needs summary first:
+        /// it counts exactly the lines drawn as waiting (25 Sep, "the number
+        /// in the summary equals the number of filled items below"). Then the
+        /// sentence the hand said when opened, then a count.
+        public static func summaryText(_ card: Rollup, said: String? = nil) -> String {
+            card.panelSummary ?? said ?? summary(card)
+        }
+
+        /// The lines, as rows under `parent`: the summary, the first `shown`
+        /// lines, and "N more…" when more would show; `all` is "more…"
+        /// pressed. Each item row wears its kind as its lamp. Each opens its
+        /// card, which is why each carries a recorded turn.
         public static func rows(parent: String, card: Rollup, said: String? = nil,
                                 all: Bool = false) -> [SessionRow] {
-            let summaryText = said ?? card.panelSummary ?? summary(card)
-            var out = [SessionRow(id: id(parent, .summary), name: summaryText, aux: "",
+            var out = [SessionRow(id: id(parent, .summary), name: summaryText(card, said: said), aux: "",
                                   lamp: .running, read: .opened, hasRecordedTurn: true)
                 .placed(pinned: false, parentId: parent)]
-            let lines = lines(card)
-            let count = min(lines.count, all ? most : shown)
-            for (index, line) in lines.prefix(count).enumerated() {
-                let project = index < card.projects.count ? card.projects[index] : nil
-                out.append(SessionRow(id: id(parent, .item(index + 1)), name: line, aux: "",
-                                      lamp: .running, read: .none,
-                                      detail: project.map(itemSentence) ?? line,
-                                      hasRecordedTurn: true)
+            let full = expanded(card)
+            let lines = all ? full : Array(full.prefix(shown))
+            for (index, item) in lines.enumerated() {
+                out.append(SessionRow(id: id(parent, .item(index + 1)), name: item.line, aux: "",
+                                      lamp: lamp(for: item.kind), read: .none,
+                                      detail: item.line, hasRecordedTurn: true)
                     .placed(pinned: false, parentId: parent))
             }
-            if count < min(lines.count, most) {
-                out.append(SessionRow(id: id(parent, .more), name: "more…", aux: "", lamp: .running,
-                                      read: .opened, hasRecordedTurn: true)
+            if lines.count < full.count {
+                out.append(SessionRow(id: id(parent, .more), name: "\(full.count - lines.count) more…", aux: "",
+                                      lamp: .running, read: .opened, hasRecordedTurn: true)
                     .placed(pinned: false, parentId: parent))
             }
             return out
@@ -836,7 +1009,7 @@ public enum RightHands {
 
         /// Run each due hand's command and keep what it printed. Blocking;
         /// call it detached.
-        public func refresh(_ hands: [String: Hand], maxAge: TimeInterval = 30) {
+        public func refresh(_ hands: [String: Hand], maxAge: TimeInterval = 10) {
             let due = claimStale(hands.filter { $0.value.hasCard }.map(\.key), maxAge: maxAge)
             for id in due {
                 defer { release(id) }

@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""hand-status --name <Name> --session <id> [--health]: a right-hand's card (25 Sep).
+
+What the Director app's row and accordion show for a hand with no projects
+command of its own (Yobi1, Sys-3PO), in the card's items format:
+
+    {"summary": "…", "moving": false,
+     "items": [{"line": "…", "kind": "waiting" | "ready" | "blocked"}]}
+
+- Its session, as Director's store sees it (`director --json status`): waiting
+  on you is a "waiting" item with its question; working is `moving`; blocked
+  on another agent (or on Director) is a "blocked" item, never counted.
+- --health (Sys-3PO): each open alert from `s3po-health status --json` is a
+  "waiting" item. Its notes are advice and stay off the card.
+
+Always prints a card; a source that cannot be read adds nothing.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+
+
+def tool(name):
+    return shutil.which(name) or os.path.expanduser(f"~/.local/bin/{name}")
+
+
+def run_json(argv, timeout=15):
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        return json.loads(r.stdout) if r.stdout.strip() else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def clip(text, words=12):
+    t = re.sub(r"`[^`]*`", "a command", " ".join((text or "").split())).replace("*", "")
+    first = re.split(r"(?<=[.?!])\s", t, maxsplit=1)[0]
+    cut = " ".join(first.split()[:words])
+    return cut + ("…" if len(cut) < len(first) else "")
+
+
+def what(agent):
+    for key in ("pending_question", "question", "worker_note", "block_detail"):
+        v = (agent.get(key) or "").strip()
+        if v and not v.startswith("?"):
+            return clip(v)
+    reason = next((r for r in agent.get("reasons") or [] if not r.startswith("Jev:")), "")
+    return clip(reason)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--name", required=True)
+    ap.add_argument("--session", required=True)
+    ap.add_argument("--health", action="store_true")
+    a = ap.parse_args()
+
+    items, moving = [], False
+    status = run_json([tool("director"), "--json", "status"]) or {}
+    for group, rows in (status.get("groups") or {}).items():
+        for agent in rows or []:
+            if agent.get("session_id") != a.session:
+                continue
+            if group == "needs_you":
+                items.append({"line": f"{a.name}: {what(agent) or 'waiting on you'}", "kind": "waiting"})
+            elif group == "working":
+                moving = True
+            elif group in ("blocked", "needs_director"):
+                items.append({"line": f"{a.name}: {what(agent) or 'blocked on another agent'}", "kind": "blocked"})
+
+    if a.health:
+        health = run_json([tool("s3po-health"), "status", "--json"]) or {}
+        fresh = (health.get("age_s") or 0) <= (health.get("stale_after_s") or 300)
+        for alert in (health.get("alerts") or []) if fresh else []:
+            items.append({"line": "Mac: " + clip(alert.get("message") or alert.get("kind") or "an alert"),
+                          "kind": "waiting"})
+
+    waiting = [i for i in items if i["kind"] == "waiting"]
+    if waiting:
+        n = len(waiting)
+        summary = (f"{a.name}: 1 thing needs you." if n == 1 else f"{a.name}: {n} things need you.")
+    elif moving:
+        summary = f"{a.name} is working; nothing needs you."
+    else:
+        summary = f"Nothing from {a.name} needs you."
+    print(json.dumps({"summary": summary, "moving": moving, "items": items}))
+
+
+if __name__ == "__main__":
+    main()

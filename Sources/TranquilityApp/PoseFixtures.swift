@@ -140,23 +140,29 @@ extension StatusHUD {
         // the accordion drawn by the same Core builder the app uses, so this
         // picture is the rendering Ahmed gets, with Director's words in it.
         case "right-hands-open":
+            // tb-indicators (25 Sep): Director filled (its needs list is not
+            // empty), Yobi1 hollow (working), Sys-3PO nothing (quiet), the
+            // placeholder greyed; Director open with "more…" pressed: five
+            // waiting lines (the summary's five), two ready, one blocked.
             let director = "ac03daf5-bd0a-42a7-91b2-fe789e3f8a1a"
+            let lines = ["Wispr: run this command for YobiWispr?",
+                         "Code hygiene: approval needed to send private repository\u{2026}",
+                         "TeamChat: run this command for TeamChat desktop?",
+                         "TeamChat: switch model for TeamChat iOS?",
+                         "React web app: switch model for React parity?"]
             let card = RightHands.Rollup(
-                projects: [], needsYou: 7,
-                panelSummary: "Seven things need you: approval needed to send private repository "
-                    + "metadata to TypeSafe, switch model for TeamChat iOS, one more.",
-                panelLines: ["Code hygiene: approval needed to send private repository\u{2026}",
-                             "TeamChat: switch model for TeamChat iOS?",
-                             "React web app: switch model for React parity?",
-                             "YobiWork: a decision, waiting 6 days",
-                             "Yobi1: something to do, waiting since yesterday"])
+                projects: [], needsYou: lines.count,
+                panelSummary: "Five things need you: run this command for YobiWispr, approval needed "
+                    + "to send private repository metadata to TypeSafe, and three more.",
+                panelLines: lines,
+                items: lines.map { .init(line: $0, kind: .waiting) } + [
+                    .init(line: "React web app: GTM call queue in React", kind: .ready),
+                    .init(line: "Yobi1: connect one real decision end to end", kind: .ready),
+                    .init(line: "w-a3: waiting on w-a2's merge", kind: .blocked)])
             showIdle(rows: [SessionRow(id: director, name: "Director", aux: "", lamp: .ready,
                                        read: .unread, hasRecordedTurn: true).placed(pinned: true)]
-                + RightHands.Accordion.rows(
-                    parent: director, card: card,
-                    said: "Ahmed, seven things need you; first, approval needed to send private "
-                        + "repository metadata to TypeSafe for the code hygiene work.")
-                + [SessionRow(id: "y1", name: "Yobi1", aux: "", lamp: .ready, read: .unread,
+                + RightHands.Accordion.rows(parent: director, card: card, all: true)
+                + [SessionRow(id: "y1", name: "Yobi1", aux: "", lamp: .working, read: .none,
                               hasRecordedTurn: true).placed(pinned: true),
                    SessionRow(id: "s3", name: "Sys-3PO", aux: "", lamp: .running,
                               hasRecordedTurn: true).placed(pinned: true),

@@ -183,3 +183,32 @@ hand's brain (`askBrain`) and speaks the answer on that hand's card.
 every install and gives Yobi1 and Sys-3PO their `ask` in that folder's roster
 when they have none. The `ask` runs them through `/usr/bin/python3`: the app keeps
 every file in its folder at 600, so nothing there is executable. Prod's roster is never touched.
+
+## Indicators (25 Sep, tb-indicators)
+
+Ahmed: "it's not just voice; the little indicators that say this agent is
+waiting on me matter." They tell the same truth as the spoken sentence.
+
+- **A hand's row** is in one of three states. It is **filled** (solid green)
+  only when something waits on him, **hollow** (a blue ring) when work is
+  moving, and shows **nothing** when quiet. A hand with a card is its card and
+  nothing else. For Director that card is its needs list after its noise rules
+  (`needs.lines` in `director --json status`), not the raw `needs_you` group.
+  Before a brain hand's first card arrives it claims nothing. A hand with no
+  card is its session: its own waiting turn, or Director's word.
+- **The summary line** is Director's `needs.summary`. It counts exactly the
+  lines drawn as waiting, so the number said equals the number of filled
+  lines. Tapping the hand speaks the same sentence.
+- **Each line** wears one glyph for what it is:
+  - ● waiting on you: counted and said;
+  - ◆ ready for you to look at (`director --json ready`, the hand's `ready` command);
+  - ◌ blocked on another agent (Director's `blocked` and `needs_director` groups).
+
+  Ready and blocked lines are never spoken and never counted. They are drawn
+  after the waiting ones, two of each at most.
+- **Three lines show**, then "N more…". More shows every waiting line.
+- **Yobi1 and Sys-3PO** use the same three states from `brains/hand-status`, their
+  `projects` command. It reads their session in Director's store and, for
+  Sys-3PO, its open `s3po-health` alerts.
+- **Refresh:** cards refresh every 10 seconds and the grid redraws every 5 seconds,
+  so a dot changes with no tap.
