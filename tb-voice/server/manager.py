@@ -611,6 +611,10 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         itself (25 Sep)."""
         secs = self._card_secs(reply)
         self._last_answer = (reply, time.monotonic())
+        # Director's line ends about `secs` from now; a reply within the
+        # follow-up window after that is Director's without its name.
+        import director_link
+        self._follow_up_until = time.monotonic() + secs + director_link.FOLLOW_UP_SECS
         await self._input_ready.wait()
         async with self._voice:
             self._require_current()

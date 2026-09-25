@@ -105,21 +105,37 @@ class ByName(unittest.TestCase):
         self.assertIsNone(d.hand_argv(d.hand_named("TeamChat Manager"), "hi"))
 
     def test_director_default_routes_everything_but_a_name_or_stop(self):
-        for t, want in (("yes", ("ask", "yes")), ("the second one", ("ask", "the second one")),
+        # Follow-ups: said within the window after Director spoke.
+        for t, want in (("yes", ("ask", "yes")), ("the second one", ("ask", "the second one"))):
+            self.assertEqual(d.route_default(t, follow_up=True), want, t)
+        for t, want in (
                         ("Director, what needs me?", ("ask", "what needs me?")),
                         ("Yobi1, what's my day?", ("hand", "Yobi1", "what's my day?")),
                         ("stop", ("mute", "")), ("Okay, stop.", ("mute", "")), ("", None), ("...", None)):
             self.assertEqual(d.route_default(t), want, t)
 
+    def test_the_address_gate(self):
+        # The room's talk, measured 25 Sep: never Director's without a name or
+        # a follow-up window.
+        for t in ("Did you have some of the rice? You need carbs.", "He's hot.", "Man.", "yes",
+                  "If you don't care to drop him up.", "That's his style."):
+            self.assertIsNone(d.route_default(t), t)
+        self.assertEqual(d.route_default("Adrian Quility, what needs me?"), ("ask", "what needs me?"),
+                         "Tranquility, misheard, is a name for Director")
+        self.assertEqual(d.route_default("Tranquility, anything for me?"), ("ask", "anything for me?"))
+        self.assertEqual(d.route_default("Directors, status"), ("ask", "status"))
+        self.assertEqual(d.route_default("Hey, Director, can you hear me?"), ("ask", "can you hear me?"))
+        self.assertIsNone(d.route_default("Andrew, pass the salt."), "not near enough")
+
     def test_the_real_microphone_spellings(self):
         # Measured through the MacBook microphone, 25 Sep.
         self.assertEqual(d.route_default("Yobi-Wan. What's my day?"), ("hand", "Yobi1", "What's my day?"))
-        self.assertEqual(d.route_default("Tell the Whisper worker yes."), ("ask", "Tell the Wispr worker yes."))
+        self.assertEqual(d.route_default("Tell the Whisper worker yes.", follow_up=True),
+                         ("ask", "Tell the Wispr worker yes."))
         self.assertEqual(d.route_default("Director."), ("call", "Director"), "a name alone is a call")
         self.assertEqual(d.route_default("Yodhi1. What's my day?"), ("hand", "Yobi1", "What's my day?"))
-        self.assertEqual(d.route_default("Come on. What's my day?"), ("ask", "Come on. What's my day?"),
-                         "a near name needs to be near")
-        self.assertEqual(d.route_default("Yoda, what's my day?"), ("ask", "Yoda, what's my day?"))
+        self.assertIsNone(d.route_default("Come on. What's my day?"), "a near name needs to be near")
+        self.assertIsNone(d.route_default("Yoda, what's my day?"))
         self.assertEqual(d.route_default("Yobi one?"), ("call", "Yobi1"))
 
     def test_the_cards_own_voice_is_not_a_turn(self):
@@ -210,16 +226,19 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         run = AsyncMock(return_value=(0, "Done."))
         env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
         with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()):
-            for t in ("yes", "the second one", "tell the Wispr worker yes", "what's the weather like"):
-                await self.m._dialogue_turn(t, None, None)
+            await self.m._dialogue_turn("Director, what needs me?", None, None)
+            for t in ("yes", "the second one", "tell the Wispr worker yes"):
+                await self.m._dialogue_turn(t, None, None)   # follow-ups: Director just spoke
+            self.m._follow_up_until = 0.0                     # the window has passed
+            await self.m._dialogue_turn("what's the weather like", None, None)
             self.m.broadcast_interruption = AsyncMock()
             self.m._do_mute = AsyncMock()
             await self.m._dialogue_turn("stop", None, None)
             await self.m._dialogue_turn("   ", None, None)
         asked = [(c.args[2], c.args[-1]) for c in run.await_args_list]
-        self.assertEqual(asked, [("yes", "ac03daf5"), ("the second one", "ac03daf5"),
-                                 ("tell the Wispr worker yes", "ac03daf5"), ("what's the weather like", "ac03daf5")],
-                         "every utterance, one thread")
+        self.assertEqual(asked, [("what needs me?", "ac03daf5"), ("yes", "ac03daf5"), ("the second one", "ac03daf5"),
+                                 ("tell the Wispr worker yes", "ac03daf5")],
+                         "named, then follow-ups, one thread; the room's talk after the window is ignored")
         self.m._jev.ask.assert_not_awaited()
         self.m._do_mute.assert_awaited_once()
 
@@ -249,8 +268,8 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([c for c in emit.await_args_list if c.args[1:] == ("answer",)], [],
                              "the room's talk: Director says nothing, and so does everyone else")
             with patch("manager._run", AsyncMock(return_value=(1, "boom"))):
-                await self.m._dialogue_turn("what needs me?", None, None)
-                await self.m._dialogue_turn("what needs me?", None, None)
+                await self.m._dialogue_turn("Director, what needs me?", None, None)
+                await self.m._dialogue_turn("Director, what needs me?", None, None)
         self.m._say.assert_not_awaited()
         said = [c.kwargs["text"] for c in emit.await_args_list if c.args[1:] == ("answer",)]
         self.assertEqual(said, ["Director didn't answer just now."], "once a minute, on the card, in its voice")

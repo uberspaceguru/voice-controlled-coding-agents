@@ -133,14 +133,23 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 self._input_ready.set()
                 note("you", text, "echo of the card, ignored")
                 return
-            routed = director_link.route_default(text) if default else director_link.route(text)
+            now = time.monotonic()
+            called = getattr(self, "_called", None)
+            follow_up = (now < getattr(self, "_follow_up_until", 0.0)
+                         or bool(called and now - called[1] < director_link.CALL_WINDOW))
+            routed = (director_link.route_default(text, follow_up=follow_up) if default
+                      else director_link.route(text))
             if default and routed is not None and routed[0] != "call":
-                routed = director_link.answer_call(routed, getattr(self, "_called", None), time.monotonic())
+                routed = director_link.answer_call(routed, called, now)
                 self._called = None
             if routed is None and default:
+                # Not for anyone: the room's talk. No event says it was
+                # addressed, and Director never hears it (tb-address-gate).
                 settled = True
                 self._judging = None
                 self._input_ready.set()
+                await emit(self, "listening", text=text[:120])
+                note("you", text, "not addressed; ignored")
                 return
             if routed is not None:
                 settled = True

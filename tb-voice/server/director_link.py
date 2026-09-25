@@ -58,7 +58,7 @@ ROSTER = _roster_path()
 # several ways; all of them are the name when they open the turn.
 # The name must END the vocative (a comma, a stop, or the end of the turn):
 # "the director of engineering said no" is not addressed to Director.
-_VOCATIVE = re.compile(r"^\s*(?:hey\s+|ok(?:ay)?\s+)?(?:the\s+)?director\s*(?:[,.:;!?-]+\s*|$)", re.I)
+_VOCATIVE = re.compile(r"^\s*(?:(?:hey|hi|ok(?:ay)?)[,\s]+)?(?:the\s+)?director\s*(?:[,.:;!?-]+\s*|$)", re.I)
 
 # What Director is for, said without its name.
 _FOR_DIRECTOR = re.compile(
@@ -114,7 +114,8 @@ def _close(name: str, spoken: str) -> bool:
     the transcriber heard "Yobi one" as "Yodhi1." and "Yobi-Wan." (25 Sep).
     Two edits for a name of five letters or more, none below that."""
     key, heard = _key(name), _key(spoken)
-    return len(key) >= 5 and abs(len(key) - len(heard)) <= 2 and _distance(key, heard) <= 2
+    limit = 3 if len(key) >= 10 else 2 if len(key) >= 5 else 0   # "Adrian Quility" is Tranquility, 3 edits
+    return limit > 0 and abs(len(key) - len(heard)) <= limit and _distance(key, heard) <= limit
 
 
 def _named_hand(t: str, names: list[str]) -> tuple[str, str] | None:
@@ -167,6 +168,9 @@ def spoken_fixes(text: str) -> str:
 # answering the name alone answered twice. A call is heard with the listening
 # cue, and the next utterance within this window goes to the one called.
 CALL_WINDOW = 8.0
+# A follow-up ("yes", "the second one") is Director's when it comes within this
+# many seconds of Director finishing a line.
+FOLLOW_UP_SECS = 8.0
 
 
 # The card's own voice, heard back (25 Sep, real microphone): the mic is muted
@@ -193,9 +197,31 @@ def director_default() -> bool:
     return os.getenv("TB_DEFAULT_INTERLOCUTOR", "").strip().lower() == "director"
 
 
-def route_default(text: str, names: list[str] | None = None) -> tuple[str, ...] | None:
-    """Director's hands-free: every utterance is Director's unless it opens with
-    another hand's name, or is only "stop". None for an empty turn."""
+# Director answers to its own name and to the voice's: "Tranquility, …" is
+# Ahmed talking to the voice, which is Director's (25 Sep). Heard as
+# "Adrian Quility" on the real microphone.
+DIRECTOR_NAMES = ("Director", "Tranquility")
+
+
+def _director_vocative(t: str) -> str | None:
+    """The rest of the turn when it opens by calling Director (or Tranquility),
+    exactly or near enough before a real stop; else None."""
+    m = _VOCATIVE.match(t) or re.match(r"(?i)^\s*(?:(?:hey|hi|ok(?:ay)?)[,\s]+)?tranquill?ity\s*(?:[,.:;!?-]+\s*|$)", t)
+    if m:
+        return t[m.end():]
+    body = t[_OPENER.match(t).end():]
+    stop = re.search(r"\s*[,.:;!?]+\s*", body)
+    if stop and len(body[:stop.start()].split()) <= 3 and any(_close(n, body[:stop.start()]) for n in DIRECTOR_NAMES):
+        return body[stop.end():]
+    return None
+
+
+def route_default(text: str, names: list[str] | None = None, follow_up: bool = False) -> tuple[str, ...] | None:
+    """Director's hands-free, gated (25 Sep, tb-address-gate): a turn is for a
+    right-hand only when it opens with a name (a hand's, or Director's, or
+    Tranquility's, near names included), or when it is a follow-up (said within
+    a few seconds of Director speaking, or of a call). Anything else is the
+    room's talk and None: ignored, silently. "Stop" always stops."""
     t = (text or "").strip()
     if not t or not re.search(r"[A-Za-z0-9]", t):
         return None
@@ -205,11 +231,13 @@ def route_default(text: str, names: list[str] | None = None) -> tuple[str, ...] 
     if named:
         rest = spoken_fixes(named[1]).strip()
         return ("hand", named[0], rest) if re.search(r"[A-Za-z0-9]", rest) else ("call", named[0])
-    m = _VOCATIVE.match(t)
-    if m:
-        rest = spoken_fixes(t[m.end():]).strip()
+    rest = _director_vocative(t)
+    if rest is not None:
+        rest = spoken_fixes(rest).strip()
         return ("ask", rest) if re.search(r"[A-Za-z0-9]", rest) else ("call", "Director")
-    return ("ask", spoken_fixes(t))
+    if follow_up:
+        return ("ask", spoken_fixes(t))
+    return None
 
 
 def answer_call(routed: tuple, called: tuple | None, now: float) -> tuple:
