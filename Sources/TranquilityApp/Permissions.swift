@@ -136,6 +136,13 @@ struct Permissions {
         /// every kind here including Automation, whose prompt this app is the
         /// only thing that can trigger. The cost of requiring is one more row
         /// to grant once. The cost of hedging was tonight.
+        /// The rows this build asks for, in order: every kind, minus the two
+        /// only the hotkey tap needs when this build has no hotkey tap. A row
+        /// that is not asked for is not shown and not counted (25 Sep: the
+        /// Director app's first run offered Accessibility and Input Monitoring
+        /// for keys it never listens to).
+        static var shown: [Kind] { allCases.filter { $0.isRequired } }
+
         /// All of them, except the two only the hotkey tap needs, in a build
         /// that has no hotkey tap (Tranquility Base Director, 25 Sep): it can
         /// never be stuck on "granted, restart to finish" for a key it does
@@ -673,7 +680,7 @@ struct Permissions {
 
     /// Rows where the restart happened and changed nothing. These are the ones
     /// that must NOT be offered another restart.
-    static var stale: [Kind] { Kind.allCases.filter { state($0) == .stale } }
+    static var stale: [Kind] { Kind.shown.filter { state($0) == .stale } }
 
     /// Whether a state is allowed to let the app through.
     ///
@@ -704,14 +711,14 @@ struct Permissions {
     ///
     /// `unknowable` is absent from this list ON PURPOSE. See `opensTheGate`.
     static var failingTheGate: [Kind] {
-        Kind.allCases.filter { !opensTheGate(state($0)) }
+        Kind.shown.filter { !opensTheGate(state($0)) }
     }
 
     /// Anything granted that this process still cannot use. One restart clears
     /// all of them at once, which is why the checklist asks once at the end
     /// rather than after each grant.
     static var pendingRestart: [Kind] {
-        Kind.allCases.filter { state($0) == .pendingRestart }
+        Kind.shown.filter { state($0) == .pendingRestart }
     }
 
     /// Progress across the whole list, required or not — "2 of 4 done".
@@ -725,7 +732,7 @@ struct Permissions {
         // beside it. "4 OF 5 DONE" over an enabled Start is the checklist
         // contradicting itself, and the row's own detail text is where the
         // nuance belongs — it says the reading could not be taken.
-        (Kind.allCases.filter { opensTheGate(state($0)) }.count, Kind.allCases.count)
+        (Kind.shown.filter { opensTheGate(state($0)) }.count, Kind.shown.count)
     }
 
     static func isGranted(_ kind: Kind) -> Bool {
@@ -894,7 +901,7 @@ struct Permissions {
         NSWorkspace.shared.open(url)
     }
 
-    static var missing: [Kind] { Kind.allCases.filter { !isGranted($0) } }
+    static var missing: [Kind] { Kind.shown.filter { !isGranted($0) } }
     /// The core loop's gate: required permissions only. Accessibility never blocks.
     static var allGranted: Bool {
         Kind.allCases.filter(\.isRequired).allSatisfy { isGranted($0) }

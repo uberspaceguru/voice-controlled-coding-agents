@@ -2653,7 +2653,7 @@ extension AppDelegate {
         let titles = (statusMenu?.items ?? []).map(\.title)
         // Input Monitoring wears a suffix naming what it is for, so match on
         // the kind's own title as a prefix rather than equality.
-        let everyKindHasARow = Permissions.Kind.allCases.allSatisfy { kind in
+        let everyKindHasARow = Permissions.Kind.shown.allSatisfy { kind in
             titles.contains { $0.contains(kind.title) }
         }
         let checklistIsReachable = (statusMenu?.items ?? []).contains {
@@ -2731,7 +2731,10 @@ extension AppDelegate {
         // No third tier. Every permission this app models either blocks or is
         // not modelled at all — ruled 26 Aug, after "(optional)" and then
         // "(fallback)" both turned out to mean "the row nobody maintains".
-        let nothingIsOptional = Permissions.Kind.allCases.allSatisfy(\.isRequired)
+        // Every row SHOWN is required. A build with no hotkey tap does not
+        // show the two rows only the tap needs (25 Sep), which is not a third
+        // tier: they are simply not asked for.
+        let nothingIsOptional = Permissions.Kind.shown.allSatisfy(\.isRequired)
         SelfTest.report("permissionSurfaces", [
             ("everyKindHasARow", everyKindHasARow),
             ("checklistIsReachable", checklistIsReachable),

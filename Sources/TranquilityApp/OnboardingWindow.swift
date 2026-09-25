@@ -80,7 +80,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // colour scheme from the rest of the app", which on a first impression
         // is the whole impression. Same ground, same face, same ink ramp as the
         // panel — `StateLegend.Palette` and `ChromeType`, not system defaults.
-        window.title = "Tranquility Base"
+        window.title = AppIdentity.displayName
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.appearance = NSAppearance(named: .darkAqua)
@@ -196,7 +196,10 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // not the first: nobody needs the chord vocabulary before they have
         // decided the thing is worth setting up.
         stack.addArrangedSubview(label(
-            "Manage a team of coding agents with your voice and two keys.",
+            AppIdentity.hotkeysEnabled
+                ? "Manage a team of coding agents with your voice and two keys."
+                // Tranquility Base Director listens on no key (25 Sep): Option is Prod's.
+                : "Your right-hands, and Director over all the rest. Tap to open, say Director to talk.",
             size: 15, weight: .medium, width: 560))
 
         // Every mark is named. Ruled 26 Aug, and already half-written at
@@ -204,14 +207,14 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // cannot say out loud, and a key you cannot name is a key you cannot
         // press. The mark earns its place by sitting NEXT TO the word, never
         // instead of it.
-        stack.addArrangedSubview(keycaps())
+        if AppIdentity.hotkeysEnabled { stack.addArrangedSubview(keycaps()) }
 
         stack.addArrangedSubview(spacer(10))
         let progress = sectionLabel("")
         progressLabel = progress
         stack.addArrangedSubview(progress)
 
-        for (index, kind) in Permissions.Kind.allCases.enumerated() {
+        for (index, kind) in Permissions.Kind.shown.enumerated() {
             stack.addArrangedSubview(permissionRow(kind, step: index + 1))
         }
 
@@ -229,7 +232,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         self.restartNote = restartNote
         stack.addArrangedSubview(restartNote)
 
-        let restart = door("Restart Tranquility Base", ink: StateLegend.Palette.fault,
+        let restart = door("Restart " + AppIdentity.displayName, ink: StateLegend.Palette.fault,
                            action: #selector(restartTapped))
         restart.isHidden = true
         restartButton = restart
@@ -307,7 +310,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     }
 
     @objc private func grantTapped(_ sender: NSButton) {
-        guard let kind = Permissions.Kind.allCases
+        guard let kind = Permissions.Kind.shown
             .first(where: { $0.title == sender.identifier?.rawValue }) else { return }
         Task { @MainActor in
             // Ask first — this both prompts when undetermined and, crucially,
@@ -367,7 +370,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // ruling as "(recommended)": the rows are the screen.
         stack.addArrangedSubview(spacer(8))
 
-        let start = door("Start using Tranquility Base", ink: StateLegend.Palette.ready,
+        let start = door("Start using " + AppIdentity.displayName, ink: StateLegend.Palette.ready,
                          action: #selector(doneTapped))
         start.keyEquivalent = "\r"
         start.isEnabled = false
@@ -440,7 +443,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         let field = NSTextField(labelWithString: "")
         let font = ChromeType.mono(ofSize: 10, weight: .regular)
         field.attributedStringValue = ChromeType.line(
-            "TRANQUILITY BASE", font: font,
+            AppIdentity.displayName.uppercased(), font: font,
             color: StateLegend.Palette.hint, tracking: 2.2)
         field.font = font
         field.drawsBackground = false
@@ -515,7 +518,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     }
 
     private func refreshPermissions() {
-        let states = Permissions.Kind.allCases.map { ($0, Permissions.state($0)) }
+        let states = Permissions.Kind.shown.map { ($0, Permissions.state($0)) }
 
         // The one step to do NOW is the first that is not finished. Everything
         // after it is dimmed: a checklist that shouts every line at once is the

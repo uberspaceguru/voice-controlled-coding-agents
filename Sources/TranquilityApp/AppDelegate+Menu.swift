@@ -253,7 +253,7 @@ extension AppDelegate {
         // Input Monitoring keeps its live probe (`hotkeyWorking`) rather than
         // the recorded grant: it is the one row where "granted" and "working"
         // genuinely disagree, and the working answer is the useful one.
-        for kind in Permissions.Kind.allCases {
+        for kind in Permissions.Kind.shown {
             // `opensTheGate`, not `== .active`, for the same reason
             // `Permissions.progress` uses it: a red dot next to a permission
             // the app merely could not READ accuses the user of a refusal
