@@ -207,14 +207,59 @@ public enum Secrets {
     /// degrading the voice.
     public nonisolated(unsafe) static var trace: (@Sendable (String) -> Void)?
 
+    /// The file as last read, and which version of it that was.
+    ///
+    /// The hub token is deliberately never held in `cache`: a sign-in or
+    /// sign-out, by this app or by `tbase`, must be seen on the next call. But
+    /// several surfaces ask for it on every repaint, so the app was opening,
+    /// decoding and LOGGING this file four times every 1.5 seconds: 136,074
+    /// "secrets: read" lines in one day of Prod 1307's app.log, and a macOS
+    /// disk-writes report for 2 GB in 12 hours (24 Sep). The file is now read
+    /// again only when it has changed on disk (path, inode, size and
+    /// modification time), so every write is still seen at once and an
+    /// unchanged file costs one `stat` and no log line.
+    private final class FileSnapshot: @unchecked Sendable {
+        struct Version: Equatable {
+            let path: String, inode: Int, size: Int, modified: Date
+        }
+        private let lock = NSLock()
+        private var version: Version?
+        private var values: [String: String] = [:]
+
+        func get(_ current: Version?) -> [String: String]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let current, current == version else { return nil }
+            return values
+        }
+
+        func put(_ values: [String: String], _ version: Version?) {
+            lock.lock(); self.values = values; self.version = version; lock.unlock()
+        }
+
+        func clear() { lock.lock(); version = nil; values = [:]; lock.unlock() }
+    }
+    private static let snapshot = FileSnapshot()
+
+    private static func fileVersion() -> FileSnapshot.Version? {
+        let path = fileURL.path
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let modified = attrs[.modificationDate] as? Date else { return nil }
+        return .init(path: path, inode: (attrs[.systemFileNumber] as? Int) ?? 0,
+                     size: (attrs[.size] as? Int) ?? 0, modified: modified)
+    }
+
     private static func readFile() -> [String: String] {
+        let version = fileVersion()
+        if let unchanged = snapshot.get(version) { return unchanged }
         do {
             let data = try Data(contentsOf: fileURL)
             let dict = try JSONDecoder().decode([String: String].self, from: data)
             Secrets.trace?("read \(fileURL.path) -> keys \(dict.keys.sorted())")
+            snapshot.put(dict, version)
             return dict
         } catch {
             Secrets.trace?("read failed at \(fileURL.path): \(error)")
+            snapshot.clear()
             return [:]
         }
     }
@@ -227,6 +272,7 @@ public enum Secrets {
         // device lock, and on macOS it can make the file unreadable depending on
         // lock state. The protection here is the 0600 mode and the 0700 directory,
         // which do not depend on anything being unlocked.
+        snapshot.clear()
         try encoder.encode(values).write(to: fileURL, options: [.atomic])
         // Belt and braces — .atomic can replace the file and reset the mode.
         try? FileManager.default.setAttributes(
