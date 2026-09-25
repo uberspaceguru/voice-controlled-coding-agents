@@ -141,7 +141,7 @@ extension StatusHUD {
         // picture is the rendering Ahmed gets, with Director's words in it.
         case "right-hands-handsfree":
             // tb-handsfree-ui (25 Sep): hands-free on, the four rows kept with
-            // their dots, the small orb and its line above STOP HANDS-FREE.
+            // their dots, upstream's orb and its line above STOP HANDS-FREE.
             setManager(on: true)
             setManagerState(Self.orbState, line: "Director · listening")
             showIdle(rows: [

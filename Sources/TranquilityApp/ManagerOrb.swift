@@ -13,22 +13,11 @@ import WebKit
 @MainActor
 final class ManagerOrbView: NSView {
     static let height: CGFloat = 150
-    /// The small orb, its line beside it (25 Sep): hands-free in a panel that
-    /// keeps its rows.
-    static let compactHeight: CGFloat = 36
     private let web: WKWebView
     private var ready = false
     private var pending: (String, String, String)?
 
-    convenience init(compact: Bool) {
-        self.init(frame: .zero, compact: compact)
-    }
-
-    override convenience init(frame: NSRect) {
-        self.init(frame: frame, compact: false)
-    }
-
-    init(frame: NSRect, compact: Bool) {
+    override init(frame: NSRect) {
         let config = WKWebViewConfiguration()
         web = WKWebView(frame: .zero, configuration: config)
         super.init(frame: frame)
@@ -43,11 +32,10 @@ final class ManagerOrbView: NSView {
             web.trailingAnchor.constraint(equalTo: trailingAnchor),
             web.topAnchor.constraint(equalTo: topAnchor),
             web.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightAnchor.constraint(equalToConstant: compact ? Self.compactHeight : Self.height),
+            heightAnchor.constraint(equalToConstant: Self.height),
         ])
         if let page = Self.pageURL() {
-            let url = compact ? URL(string: page.absoluteString + "#compact") ?? page : page
-            web.loadFileURL(url, allowingReadAccessTo: page.deletingLastPathComponent())
+            web.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
         } else {
             Permissions.log("orb: Resources/Orb/orb.html not found; the manager has no face")
         }
