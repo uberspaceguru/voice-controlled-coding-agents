@@ -181,4 +181,5 @@ hand's brain (`askBrain`) and speaks the answer on that hand's card.
 
 `scripts/install-director.sh` copies the brains into the app's own folder on
 every install and gives Yobi1 and Sys-3PO their `ask` in that folder's roster
-when they have none. Prod's roster is never touched.
+when they have none. The `ask` runs them through `/usr/bin/python3`: the app keeps
+every file in its folder at 600, so nothing there is executable. Prod's roster is never touched.

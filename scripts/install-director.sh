@@ -89,8 +89,10 @@ find "$SUPPORT" -maxdepth 1 -type f -exec chmod 600 {} + 2>/dev/null || true
 
 # The right-hands' brains (25 Sep): Yobi1 and Sys-3PO answer through small ask
 # scripts, refreshed on every install because they are the app's, not the
-# user's. A hand in this app's roster that has no `ask` of its own is given
-# one; a hand that has one keeps it. Prod's roster is never touched.
+# user's. A hand in this app's roster that has no `ask` of its own, or one
+# pointing at these scripts, is given ours; any other `ask` is kept. Prod's
+# roster is never touched. Run through python3: the app keeps every file in
+# its folder at 600 (PrivateStorage), so the scripts are never executable there.
 mkdir -p "$SUPPORT/brains"
 cp -p scripts/brains/yobi1-ask scripts/brains/sys3po-ask "$SUPPORT/brains/"
 chmod 700 "$SUPPORT/brains" "$SUPPORT/brains/"*
@@ -99,10 +101,12 @@ if [ -f "$SUPPORT/right-hands.json" ]; then
 import json, sys
 path, brains = sys.argv[1], sys.argv[2]
 data = json.load(open(path))
-asks = {"Yobi1": [f"{brains}/yobi1-ask", "{text}"], "Sys-3PO": [f"{brains}/sys3po-ask", "{text}"]}
+asks = {"Yobi1": ["/usr/bin/python3", f"{brains}/yobi1-ask", "{text}"],
+        "Sys-3PO": ["/usr/bin/python3", f"{brains}/sys3po-ask", "{text}"]}
 given = []
 for hand in data.get("hands", []):
-    if hand.get("name") in asks and not hand.get("ask"):
+    ours = any(brains in str(a) for a in hand.get("ask") or [])
+    if hand.get("name") in asks and (not hand.get("ask") or ours) and hand.get("ask") != asks[hand["name"]]:
         hand["ask"] = asks[hand["name"]]
         given.append(hand["name"])
 if given:
