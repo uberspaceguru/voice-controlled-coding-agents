@@ -16,6 +16,12 @@ voice; it is not the fleet manager and it is not Director. So:
    right-hands.json and the counts from `director --json status`, never its own
    list of every live process.
 
+4. Each right-hand is talked to by name (25 Sep): "Yobi1, …", "Sys-3PO, …"
+   go to that hand's own brain (its `ask` in right-hands.json), and
+   "Director, …" to Director. In Tranquility Base Director (the host sets
+   TB_RIGHT_HAND_CARDS) the turn is handed to the app, which speaks the answer
+   on the hand's own card. A hand with no session is a placeholder and says so.
+
 `route` is pure, so tests/test_director_link.py runs without the pipeline.
 """
 
@@ -26,8 +32,19 @@ import shutil
 
 
 THREAD = os.getenv("TB_DIRECTOR_THREAD", "tranquility:voice")
-ROSTER = os.path.expanduser(os.getenv(
-    "TB_RIGHT_HANDS", "~/Library/Application Support/VoiceDispatch/right-hands.json"))
+
+
+def _roster_path() -> str:
+    """TB_RIGHT_HANDS, else the host app's own folder (the Director app hands
+    its folder over as VOICE_DISPATCH_SUPPORT_DIR), else Prod's."""
+    if os.getenv("TB_RIGHT_HANDS"):
+        return os.path.expanduser(os.environ["TB_RIGHT_HANDS"])
+    if os.getenv("VOICE_DISPATCH_SUPPORT_DIR"):
+        return os.path.join(os.path.expanduser(os.environ["VOICE_DISPATCH_SUPPORT_DIR"]), "right-hands.json")
+    return os.path.expanduser("~/Library/Application Support/VoiceDispatch/right-hands.json")
+
+
+ROSTER = _roster_path()
 
 # The vocative: the turn opens with Director's name. The transcriber writes it
 # several ways; all of them are the name when they open the turn.
@@ -52,18 +69,66 @@ _IDENTITY = re.compile(
     r"(?i)\b(are you (?:the )?director|who are you|what are you|are you the fleet manager|who am i talking to)\b")
 
 
-def route(text: str) -> tuple[str, str] | None:
+# A right-hand's name as the transcriber writes it, reduced by `_key` (lower
+# case, number words as digits, nothing but letters and digits): "Yobi one",
+# "Yobi-1" -> "yobi1"; "Sys three P O", "C-3PO", "S3PO" -> the sys3po pattern.
+_NUMBERS = {"one": "1", "won": "1", "two": "2", "three": "3", "four": "4", "five": "5"}
+_ALIASES = {
+    "yobi1": r"y[oa]b+(?:i|y|ee|ie|e)?1",
+    "sys3po": r"(?:s[iy]s(?:tem)?|see|sea|c|s)3p(?:o|0|oh|eo)",
+    "teamchatmanager": r"teamchat(?:manager)?",
+}
+_OPENER = re.compile(r"(?i)^\s*(?:(?:hey|hi|ok(?:ay)?|yo)\s+)?(?:the\s+)?")
+_STOP = re.compile(r"\s*[,.:;!?-]+\s*")
+
+
+def _key(words: str) -> str:
+    return "".join(_NUMBERS.get(w, w) for w in re.findall(r"[a-z0-9]+", (words or "").lower()))
+
+
+def _matches(name: str, spoken: str) -> bool:
+    key = _key(name)
+    return bool(key) and re.fullmatch(_ALIASES.get(key, re.escape(key)), _key(spoken)) is not None
+
+
+def _named_hand(t: str, names: list[str]) -> tuple[str, str] | None:
+    """(hand name, the rest) when the turn opens by naming a right-hand other
+    than Director, else None. Up to four words of name; a stop after it, or no
+    stop at all (these names are not English words: "Yobi one what's on").
+    """
+    body = t[_OPENER.match(t).end():]
+    others = [n for n in names if _key(n) != "director"]
+    stop = _STOP.search(body)
+    if stop and len(body[:stop.start()].split()) <= 4:
+        head, rest = body[:stop.start()], body[stop.end():]
+        for n in others:
+            if _matches(n, head):
+                return n, rest.strip()
+    words = body.split()
+    for k in range(min(4, len(words)), 0, -1):
+        for n in others:
+            if _matches(n, " ".join(words[:k])):
+                return n, " ".join(words[k:]).lstrip(",.:;!?- ").strip()
+    return None
+
+
+def route(text: str, names: list[str] | None = None) -> tuple[str, ...] | None:
     """What to do with a turn, or None to leave it to the dialogue policy.
 
-    ("ask", words) sends `words` to Director; ("identity", "") answers who the
-    voice is. The vocative is kept in the words: Director's own router
-    understands "Director, what needs me?" and keeps the thread's items bound.
+    ("ask", words) sends `words` to Director; ("hand", name, words) sends them
+    to the right-hand of that name; ("identity", "") answers who the voice is.
+    The vocative is kept out of a hand's words and kept in Director's: Director's
+    own router understands "Director, what needs me?". `names` defaults to the
+    roster's.
     """
     t = (text or "").strip()
     if not t:
         return None
     if _IDENTITY.search(t):
         return ("identity", "")
+    named = _named_hand(t, right_hands() if names is None else names)
+    if named:
+        return ("hand", named[0], named[1] or "what needs me?")
     m = _VOCATIVE.match(t)
     if m:
         rest = t[m.end():].strip()
@@ -73,8 +138,8 @@ def route(text: str) -> tuple[str, str] | None:
     return None
 
 
-IDENTITY_LINE = ("I'm Tranquility, your voice here. Director runs your agents and answers "
-                 "through me: say Director, then what you need.")
+IDENTITY_LINE = ("I'm Tranquility, your voice here. Talk to each right-hand by name: say "
+                 "Director, Yobi1 or Sys-3PO, then what you need.")
 
 
 def director_bin() -> str:
@@ -112,13 +177,42 @@ def chunks(line: str, max_words: int = 70) -> list[str]:
     return parts
 
 
-def right_hands(path: str = ROSTER) -> list[str]:
+def hands(path: str | None = None) -> list[dict]:
     try:
-        data = json.load(open(path))
+        with open(path or ROSTER) as fh:
+            data = json.load(fh)
     except (OSError, ValueError):
         return []
-    hands = data.get("hands", data) if isinstance(data, dict) else data
-    return [h.get("name") for h in hands if isinstance(h, dict) and h.get("name")]
+    rows = data.get("hands", data) if isinstance(data, dict) else data
+    return [h for h in rows if isinstance(h, dict) and h.get("name")]
+
+
+def right_hands(path: str | None = None) -> list[str]:
+    return [h["name"] for h in hands(path)]
+
+
+def hand_named(name: str, path: str | None = None) -> dict | None:
+    return next((h for h in hands(path) if h["name"] == name), None)
+
+
+def hand_argv(hand: dict, text: str) -> list[str] | None:
+    """A hand's `ask` template filled, as right-hands.json writes it; the words
+    are one argv element. None when the hand has no brain."""
+    template = hand.get("ask")
+    if not isinstance(template, list) or not template:
+        return None
+    session = hand.get("session") or ""
+    argv = [str(a).replace("{text}", text).replace("{conversation}", session).replace("{session}", session)
+            for a in template]
+    argv[0] = os.path.expanduser(argv[0])
+    if "/" not in argv[0]:
+        argv[0] = shutil.which(argv[0]) or os.path.expanduser(f"~/.local/bin/{argv[0]}")
+    return argv
+
+
+def cards_host() -> bool:
+    """The host speaks a hand's answer on the hand's card (the Director app)."""
+    return os.getenv("TB_RIGHT_HAND_CARDS") == "1"
 
 
 def inventory(status: dict, hands: list[str]) -> str:

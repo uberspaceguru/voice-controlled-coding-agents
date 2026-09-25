@@ -5,6 +5,21 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import director_link as d  # noqa: E402
+import json  # noqa: E402
+import tempfile  # noqa: E402
+
+# A roster of its own, so no test reads the Mac's right-hands.json.
+_ROSTER = os.path.join(tempfile.mkdtemp(), "right-hands.json")
+with open(_ROSTER, "w") as _fh:
+    json.dump({"hands": [
+        {"name": "Director", "session": "ac03daf5", "ask": ["director", "ask", "{text}", "--channel", "tranquility",
+                                                            "--external-id", "{conversation}"]},
+        {"name": "Yobi1", "session": "e781aff1", "ask": ["~/brains/yobi1-ask", "{text}"]},
+        {"name": "Sys-3PO", "session": "2b973845", "ask": ["/opt/brains/sys3po-ask", "{text}"]},
+        {"name": "TeamChat Manager"},
+    ]}, _fh)
+d.ROSTER = _ROSTER
+os.environ.pop("TB_RIGHT_HAND_CARDS", None)
 
 
 class Route(unittest.TestCase):
@@ -62,6 +77,40 @@ class Inventory(unittest.TestCase):
                          "Director is tracking the rest: 1 needs you.")
 
 
+
+class ByName(unittest.TestCase):
+    """Each right-hand is talked to by name (25 Sep)."""
+
+    def test_a_hand_named_first_gets_the_words(self):
+        for t, want in (("Yobi one, what's on today?", ("hand", "Yobi1", "what's on today?")),
+                        ("Yobi1 what do I have today", ("hand", "Yobi1", "what do I have today")),
+                        ("Hey Yobi-1", ("hand", "Yobi1", "what needs me?")),
+                        ("Sys three P O, how's the Mac?", ("hand", "Sys-3PO", "how's the Mac?")),
+                        ("C-3PO, is the disk ok?", ("hand", "Sys-3PO", "is the disk ok?")),
+                        ("Sys-3PO, check the fleet", ("hand", "Sys-3PO", "check the fleet")),
+                        ("TeamChat Manager, anything?", ("hand", "TeamChat Manager", "anything?"))):
+            self.assertEqual(d.route(t), want, t)
+
+    def test_director_and_instructions_stay_directors(self):
+        self.assertEqual(d.route("Director, what needs me?"), ("ask", "what needs me?"))
+        self.assertEqual(d.route("ask Yobi1 to pause the backfill"), ("ask", "ask Yobi1 to pause the backfill"))
+        for t in ("Siri, what time is it", "so three people came", "yo buddy what's up"):
+            self.assertIsNone(d.route(t), t)
+
+    def test_a_hands_ask_is_filled_as_one_argument(self):
+        argv = d.hand_argv(d.hand_named("Yobi1"), "what's on; rm -rf ~")
+        self.assertEqual(argv, [os.path.expanduser("~/brains/yobi1-ask"), "what's on; rm -rf ~"])
+        self.assertEqual(d.hand_argv(d.hand_named("Director"), "hi")[1:],
+                         ["ask", "hi", "--channel", "tranquility", "--external-id", "ac03daf5"])
+        self.assertIsNone(d.hand_argv(d.hand_named("TeamChat Manager"), "hi"))
+
+    def test_the_roster_is_the_host_apps(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"VOICE_DISPATCH_SUPPORT_DIR": "/x/VoiceDispatch-Director"}, clear=False):
+            os.environ.pop("TB_RIGHT_HANDS", None)
+            self.assertEqual(d._roster_path(), "/x/VoiceDispatch-Director/right-hands.json")
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -95,6 +144,31 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.m._jev.ask.assert_not_awaited()
         said = [c.args[0] for c in self.m._say.await_args_list]
         self.assertEqual(said, ["Director: Waiting on you: 1: w-a17: needs a Granola key."])
+
+    async def test_a_hand_answers_in_its_own_name(self):
+        from unittest.mock import AsyncMock, patch
+        with patch("manager._run", AsyncMock(return_value=(0, "The Mac is fine: pressure normal."))) as run:
+            await self.m._dialogue_turn("Sys-3PO, how's the Mac?", None, None)
+        self.assertEqual(run.await_args.args, ("/opt/brains/sys3po-ask", "how's the Mac?"))
+        self.m._jev.ask.assert_not_awaited()
+        self.assertEqual([c.args[0] for c in self.m._say.await_args_list],
+                         ["Sys-3PO: The Mac is fine: pressure normal."])
+
+    async def test_in_the_director_app_the_card_answers(self):
+        from unittest.mock import AsyncMock, patch
+        with patch.dict(os.environ, {"TB_RIGHT_HAND_CARDS": "1"}), \
+                patch("manager._run", AsyncMock()) as run, patch("manager.emit", AsyncMock()) as emit:
+            await self.m._dialogue_turn("Yobi one, what's on today?", None, None)
+            await self.m._dialogue_turn("Director, what needs me?", None, None)
+        run.assert_not_awaited()
+        self.m._say.assert_not_awaited()
+        asks = [c.kwargs for c in emit.await_args_list if c.args[1:] == ("ask",)]
+        self.assertEqual(asks, [{"session": "e781aff1", "name": "Yobi1", "text": "what's on today?"},
+                                {"session": "ac03daf5", "name": "Director", "text": "what needs me?"}])
+
+    async def test_a_placeholder_says_so(self):
+        await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)
+        self.assertEqual(self.m._say.await_args.args[0], "TeamChat Manager isn't connected yet.")
 
     async def test_who_are_you_never_says_fleet_manager(self):
         await self.m._dialogue_turn("Are you the director?", None, None)

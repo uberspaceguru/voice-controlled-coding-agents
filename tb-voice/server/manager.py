@@ -599,6 +599,51 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                 return
             self._require_current()
 
+    async def _hand_to_card(self, name: str, words: str) -> bool:
+        """In Tranquility Base Director (TB_RIGHT_HAND_CARDS), hand the turn to
+        the app, which asks the hand's brain and speaks the answer on the
+        hand's own card (25 Sep). False when the host cannot, or the hand has no
+        brain there: the caller answers in this voice instead."""
+        import director_link
+        hand = director_link.hand_named(name)
+        if not director_link.cards_host() or not hand or not hand.get("session") or not hand.get("ask"):
+            return False
+        note("you", f"{name}: {words}", "handed to its card")
+        await emit(self, "ask", session=hand["session"], name=name, text=words)
+        return True
+
+    async def _relay_hand(self, name: str, words: str, text: str):
+        """'Yobi1, …', 'Sys-3PO, …': the hand answers, never this voice. On the
+        hand's card when the host can; else its `ask` here, spoken as
+        '<name>: …'; a hand with no brain here goes to Director, who can tell
+        it; a hand with no session is a placeholder and says so."""
+        import director_link
+        hand = director_link.hand_named(name) or {}
+        if not hand.get("session"):
+            await self._say(f"{name} isn't connected yet.", response_mode="receipt")
+            return
+        if await self._hand_to_card(name, words):
+            return
+        argv = director_link.hand_argv(hand, words)
+        if not argv:
+            await self._relay_director(text)
+            return
+        await emit(self, "tool", argv=[name, words[:80]], meaning=f"asking {name}")
+        code, out = await _run(*argv, timeout=60)
+        reply = director_link.flatten(out) if code == 0 else ""
+        if not reply:
+            logger.error(f"{name} ask failed ({code}): {out[-300:]}")
+            await self._say(f"{name} didn't answer just now.", response_mode="receipt")
+            return
+        note(name, reply, "spoken")
+        first = True
+        for part in director_link.chunks(reply):
+            line = (f"{name}: " + part) if first else part
+            first = False
+            if await self._say(line, response_mode="detail") is not True:
+                return
+            self._require_current()
+
     async def _director_inventory(self) -> str | None:
         """The fleet as Director sees it (right-hands and counts), or None."""
         import director_link

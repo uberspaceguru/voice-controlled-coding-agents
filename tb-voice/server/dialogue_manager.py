@@ -133,7 +133,9 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 await emit(self, "addressed", intent="director_" + routed[0], text=text[:120])
                 if routed[0] == "identity":
                     await self._say(director_link.IDENTITY_LINE, response_mode="receipt")
-                else:
+                elif routed[0] == "hand":
+                    await self._relay_hand(routed[1], routed[2], text)
+                elif not await self._hand_to_card("Director", routed[1]):
                     await self._relay_director(routed[1])
                 return
             targets = await self._targets()
