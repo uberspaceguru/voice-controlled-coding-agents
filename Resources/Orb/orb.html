@@ -7,7 +7,14 @@
   canvas{display:block;width:64px;height:64px}
   #line{margin-top:8px;max-width:330px;text-align:center;letter-spacing:.02em;line-height:1.3;
         display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-</style></head>
+  /* #compact (25 Sep): the same orb, small, with its line beside it, for a panel
+     that keeps its rows while hands-free is on (Tranquility Base Director). */
+  html.compact body{flex-direction:row;justify-content:flex-start;padding-left:6px;box-sizing:border-box}
+  html.compact #wrap, html.compact canvas{width:24px;height:24px}
+  html.compact #line{margin:0 0 0 4px;text-align:left;-webkit-line-clamp:1;max-width:300px;font-size:11px}
+</style>
+<script>if (location.hash === "#compact") document.documentElement.classList.add("compact");</script>
+</head>
 <body><div id="wrap"><canvas id="orb" role="img" aria-label="Tranquility"></canvas></div><div id="line">Tranquility · listening</div>
 <script>
 // thinking-orbs by Jakub Antalik (MIT), engine only: no React, plain 2D canvas.
@@ -563,7 +570,7 @@ window.Orb = {MODE_DRAWS: Ct, MODE_FRAMES: vt, STATE_TO_MODE: Ot, finalizeFrame:
 </script>
 <script>
   const { resolvePreset, MODE_DRAWS } = window.Orb;
-  const size = 64, canvas = document.getElementById("orb");
+  const size = location.hash === "#compact" ? 24 : 64, canvas = document.getElementById("orb");
   const dpr = Math.min(2, devicePixelRatio || 1);
   canvas.width = Math.round(size * dpr); canvas.height = Math.round(size * dpr);
   const ctx = canvas.getContext("2d");

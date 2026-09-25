@@ -3214,7 +3214,11 @@ final class StatusHUD: NSObject {
         // and the only door left is the one that turns it off; NEW AGENT and
         // PAST AGENTS are what the voice is for. The fleet is still there,
         // reached by speaking, and the rows come back when the manager stops.
-        if managerOn {
+        // With right-hands on the panel (Tranquility Base Director, 25 Sep)
+        // hands-free does NOT take the panel: the rows and their dots stay, and
+        // the orb is small, at the bottom, above STOP HANDS-FREE.
+        let keepsRows = face.sessionRows.contains(where: \.pinned)
+        if managerOn && !keepsRows {
             waitingRows.addArrangedSubview(managerOrb)
             managerOrb.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
             waitingRows.addArrangedSubview(hairline(StateLegend.Palette.hairlineSoft))
@@ -3323,6 +3327,21 @@ final class StatusHUD: NSObject {
         waitingRows.addArrangedSubview(newRow)
         newRow.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
         waitingRows.addArrangedSubview(hairline(StateLegend.Palette.hairlineSoft))
+        if managerOn {
+            // Hands-free beside the rows: the small orb and its line, then the
+            // one door that turns it off.
+            waitingRows.addArrangedSubview(managerOrbCompact)
+            managerOrbCompact.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+            waitingRows.addArrangedSubview(hairline(StateLegend.Palette.hairlineSoft))
+            let stopRow = PlacardRowView(
+                width: Self.gridWidth, target: self,
+                title: StateLegend.managerOffTitle, glyph: "■", action: #selector(managerRowTapped))
+            waitingRows.addArrangedSubview(stopRow)
+            stopRow.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+            waitingRows.addArrangedSubview(hairline(StateLegend.Palette.hairline))
+            Permissions.log("grid: hands-free beside \(shown.count) rows (small orb, rows kept)")
+            return
+        }
         // The manager's door (19 Sep): one placard row, both halves toggle it.
         // With no manager configured it reads SET UP HANDS-FREE (22 Sep); the
         // press still goes to the toggle, which says what is missing.
@@ -3375,16 +3394,20 @@ final class StatusHUD: NSObject {
     /// While the child connects: the ring, breathing.
     static let orbConnecting = "breathing"
     lazy var managerOrb = ManagerOrbView(frame: .zero)
+    /// The same orb, small, for a panel that keeps its rows (25 Sep).
+    lazy var managerOrbCompact = ManagerOrbView(compact: true)
     var onManagerToggle: (() -> Void)?
 
     func setManager(on: Bool) {
         managerOn = on
         managerOrb.set(on ? Self.orbConnecting : Self.orbState, line: on ? "connecting" : "off")
+        managerOrbCompact.set(on ? Self.orbConnecting : Self.orbState, line: on ? "connecting" : "off")
         if case .idle = state { render() }
     }
 
     func setManagerState(_ orbState: String, line: String, mood: String = "") {
         managerOrb.set(orbState, line: line, mood: mood)
+        managerOrbCompact.set(orbState, line: line, mood: mood)
     }
 
     @objc nonisolated private func managerRowTapped() {

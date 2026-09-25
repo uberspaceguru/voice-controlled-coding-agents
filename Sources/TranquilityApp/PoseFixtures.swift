@@ -139,6 +139,23 @@ extension StatusHUD {
         // The right-hands panel with Director open (25 Sep): four hands, and
         // the accordion drawn by the same Core builder the app uses, so this
         // picture is the rendering Ahmed gets, with Director's words in it.
+        case "right-hands-handsfree":
+            // tb-handsfree-ui (25 Sep): hands-free on, the four rows kept with
+            // their dots, the small orb and its line above STOP HANDS-FREE.
+            setManager(on: true)
+            setManagerState(Self.orbState, line: "Director · listening")
+            showIdle(rows: [
+                SessionRow(id: "ac03daf5-bd0a-42a7-91b2-fe789e3f8a1a", name: "Director", aux: "", lamp: .ready,
+                           read: .unread, hasRecordedTurn: true).placed(pinned: true),
+                SessionRow(id: "y1", name: "Yobi1", aux: "", lamp: .working, read: .none,
+                           hasRecordedTurn: true).placed(pinned: true),
+                SessionRow(id: "s3", name: "Sys-3PO", aux: "", lamp: .running,
+                           hasRecordedTurn: true).placed(pinned: true),
+                SessionRow(id: "hand:teamchat-manager", name: "TeamChat Manager", aux: "",
+                           lamp: .unlit).placed(pinned: true)])
+            // The orb is a web view, drawn out of process: a pose shows its
+            // place in the layout, not its ink.
+
         case "right-hands-open":
             // tb-indicators (25 Sep): Director filled (its needs list is not
             // empty), Yobi1 hollow (working), Sys-3PO nothing (quiet), the
