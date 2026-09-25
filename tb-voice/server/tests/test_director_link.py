@@ -270,9 +270,24 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             with patch("manager._run", AsyncMock(return_value=(1, "boom"))):
                 await self.m._dialogue_turn("Director, what needs me?", None, None)
                 await self.m._dialogue_turn("Director, what needs me?", None, None)
-        self.m._say.assert_not_awaited()
-        said = [c.kwargs["text"] for c in emit.await_args_list if c.args[1:] == ("answer",)]
-        self.assertEqual(said, ["Director didn't answer just now."], "once a minute, on the card, in its voice")
+        self.assertEqual([c.kwargs for c in emit.await_args_list if c.args[1:] == ("answer",)], [],
+                         "the live voice speaks for itself; nothing is handed to the card")
+        self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Director didn't answer just now."],
+                         "once a minute, in the one voice")
+
+    async def test_the_live_voice_speaks_director_and_keeps_the_conversation_open(self):
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        run = AsyncMock(return_value=(0, "Ten things are waiting on you; want me to run through the rest?"))
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()) as emit:
+            await self.m._dialogue_turn("what needs me?", None, None)
+            await self.m._dialogue_turn("yes, run through the rest", None, None)
+        self.assertEqual([c.args[0] for c in self.m._say.await_args_list],
+                         ["Ten things are waiting on you; want me to run through the rest?"] * 2,
+                         "spoken in the pipeline, no 'Director:' prefix")
+        self.assertEqual([c.kwargs.get("voice") for c in self.m._say.await_args_list], ["director"] * 2)
+        self.assertEqual([c for c in emit.await_args_list if c.args[1:] == ("answer",)], [])
+        self.assertEqual(len(run.await_args_list), 2, "the follow-up needed no name")
 
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)

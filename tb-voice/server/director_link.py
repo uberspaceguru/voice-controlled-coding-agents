@@ -235,7 +235,9 @@ def route_default(text: str, names: list[str] | None = None, follow_up: bool = F
     if rest is not None:
         rest = spoken_fixes(rest).strip()
         return ("ask", rest) if re.search(r"[A-Za-z0-9]", rest) else ("call", "Director")
-    if follow_up:
+    # What only Director is for opens a conversation without the name:
+    # "what needs me?", "what's ready", "catch me up".
+    if follow_up or _FOR_DIRECTOR.search(t):
         return ("ask", spoken_fixes(t))
     return None
 

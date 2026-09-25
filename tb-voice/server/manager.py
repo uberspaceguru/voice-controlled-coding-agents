@@ -638,7 +638,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         self._last_fallback = time.monotonic()
         line = f"{name} didn't answer just now."
         import director_link
-        if director_link.cards_host() and hand.get("session"):
+        if director_link.cards_host() and hand.get("session") and not director_link.director_default():
             await self._answer_on_card(hand, name, line)
         else:
             await self._say(line, response_mode="receipt")
@@ -679,18 +679,30 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             await self._hand_failed(hand, name, asked)
             return
         note(name, reply, "spoken")
-        if director_link.cards_host():
+        live = director_link.director_default()
+        if director_link.cards_host() and not live:
             await self._answer_on_card(hand, name, reply)
             return
+        # Director's hands-free is upstream's live voice (25 Sep, tb-live-voice):
+        # the reply is spoken HERE, in the pipeline, so the mic reopens the
+        # moment the voice stops (not after an estimate of an app's playback)
+        # and the next turn needs no name and no key. Director needs no prefix;
+        # another hand is named, since there is one voice. No content echo
+        # check here: the pipeline's own mute knows exactly when this voice
+        # speaks, and "yes, run through the rest" repeats Director's question
+        # by design.
         first = True
         for part in director_link.chunks(reply):
-            line = (f"{name}: " + part) if first else part
+            line = ((f"{name}: " + part) if first and not (live and name == "Director") else part)
             first = False
-            spoken = (await self._say(line, voice="director", response_mode="detail") if name == "Director"
-                      else await self._say(line, response_mode="detail"))
+            spoken = (await self._say(line, voice="director", session=hand.get("session"), response_mode="detail")
+                      if name == "Director" else await self._say(line, response_mode="detail"))
             if spoken is not True:
                 return
             self._require_current()
+        if live:
+            # The conversation stays open from the real end of the voice.
+            self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
 
     async def _director_inventory(self) -> str | None:
         """The fleet as Director sees it (right-hands and counts), or None."""
