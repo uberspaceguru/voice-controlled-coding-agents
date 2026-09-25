@@ -142,11 +142,11 @@ extension AppDelegate {
     }
 
     /// A line on a card named for the hand (ruling 7), in its voice.
-    func speakOnCard(_ text: String, as id: String, name: String) {
+    func speakOnCard(_ text: String, as id: String, name: String, force: Bool = false) {
         let spoken = SpokenTextSanitizer().sanitize(
             String(text.prefix(1200)),
             allowing: SpokenTextSanitizer.speakableTerms(in: text).union([name]))
-        speakForManager(session: id, spoken: spoken, placard: name.uppercased())
+        speakForManager(session: id, spoken: spoken, placard: name.uppercased(), force: force)
     }
 
     /// The opening sentence, spoken while the grid stays up, so the lines it

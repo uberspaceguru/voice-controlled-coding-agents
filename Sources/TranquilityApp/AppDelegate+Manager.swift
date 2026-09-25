@@ -22,11 +22,16 @@ extension AppDelegate {
     /// on the grid and the line under it says who is speaking; the card is for
     /// hands. Otherwise the same sequence the ladder uses: stop what is
     /// playing, supersede any armed announcement, show the card, speak.
+    /// `force` plays the line even with hands-free on (25 Sep, tb-speak): a
+    /// right-hand's answer arrives as `ManagerEvent.answer`, which the bot
+    /// does NOT synthesize, so here is the only mouth it has. The manager mutes
+    /// its microphone for the line's length, and drops a turn that is the
+    /// answer's own words, so this voice is not heard back as the user.
     @MainActor
-    func speakForManager(session: String, spoken: SanitizedSpokenText, placard: String) {
+    func speakForManager(session: String, spoken: SanitizedSpokenText, placard: String, force: Bool = false) {
         guard let coordinator else { return }
         Permissions.log("manager: speaking \(placard) for \(session.prefix(8)): \(spoken.text.prefix(200))")
-        if managerIsOn {
+        if managerIsOn && !force {
             // Hands-free has ONE mouth, and it is not this one.
             //
             // This used to read the line aloud here, in the session's own
@@ -707,7 +712,10 @@ extension AppDelegate {
             // The manager asked the hand; the answer is spoken on its card.
             guard let session = e.session, let text = e.text, !text.isEmpty else { break }
             let name = RightHands.hand(for: session)?.name ?? e.name ?? "Director"
-            speakOnCard(text, as: session, name: name)
+            // Played here even with hands-free on: the bot handed the line over
+            // and synthesizes nothing (the silent-answers bug, 25 Sep 17:01).
+            Permissions.log("manager: answer from \(name) for \(session.prefix(8)); playing it on the card")
+            speakOnCard(text, as: session, name: name, force: true)
         case .ask:
             // "Yobi1, what's on today?" (25 Sep): the hand's brain answers and
             // the answer is spoken on the hand's own card, as a tapped reply is.
