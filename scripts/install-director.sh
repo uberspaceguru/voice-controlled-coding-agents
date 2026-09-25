@@ -84,7 +84,32 @@ kept = {k: v for k, v in keys.items() if k not in ("hub-token", "device-key")}
 json.dump(kept, open(sys.argv[2], "w"), indent=2, sort_keys=True)
 PY
 fi
-chmod 600 "$SUPPORT"/* 2>/dev/null || true
+# Files only: a folder at 600 cannot be entered.
+find "$SUPPORT" -maxdepth 1 -type f -exec chmod 600 {} + 2>/dev/null || true
+
+# The right-hands' brains (25 Sep): Yobi1 and Sys-3PO answer through small ask
+# scripts, refreshed on every install because they are the app's, not the
+# user's. A hand in this app's roster that has no `ask` of its own is given
+# one; a hand that has one keeps it. Prod's roster is never touched.
+mkdir -p "$SUPPORT/brains"
+cp -p scripts/brains/yobi1-ask scripts/brains/sys3po-ask "$SUPPORT/brains/"
+chmod 700 "$SUPPORT/brains" "$SUPPORT/brains/"*
+if [ -f "$SUPPORT/right-hands.json" ]; then
+  python3 - "$SUPPORT/right-hands.json" "$SUPPORT/brains" <<'PY2'
+import json, sys
+path, brains = sys.argv[1], sys.argv[2]
+data = json.load(open(path))
+asks = {"Yobi1": [f"{brains}/yobi1-ask", "{text}"], "Sys-3PO": [f"{brains}/sys3po-ask", "{text}"]}
+given = []
+for hand in data.get("hands", []):
+    if hand.get("name") in asks and not hand.get("ask"):
+        hand["ask"] = asks[hand["name"]]
+        given.append(hand["name"])
+if given:
+    json.dump(data, open(path, "w"), indent=2)
+    print("  roster: gave " + " and ".join(given) + " an ask")
+PY2
+fi
 
 echo "✓ installed $DEST beside Prod"
 echo "  data folder: $SUPPORT"

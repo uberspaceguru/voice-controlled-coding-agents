@@ -18,6 +18,19 @@ final class ManagerModeTests: XCTestCase {
         XCTAssertEqual(e.goal, "ship the CRM")
     }
 
+    /// "Yobi1, what's on today?" handed to the app (25 Sep): the hand's
+    /// session, its words and its name, for the card to answer on.
+    func testAnAskForARightHandParses() throws {
+        let line = #"{"event":"ask","session":"e781aff1-defa","name":"Yobi1","text":"what's on today?"}"#
+        let e = try XCTUnwrap(ManagerEvent.parse(Data(line.utf8)))
+        XCTAssertEqual(e.event, .ask)
+        XCTAssertEqual(e.session, "e781aff1-defa")
+        XCTAssertEqual(e.name, "Yobi1")
+        XCTAssertEqual(e.text, "what's on today?")
+        XCTAssertEqual(ManagerConfig.environment(base: [:])["TB_RIGHT_HAND_CARDS"], "1",
+                       "the manager only hands a turn to a host that says it can speak on the card")
+    }
+
     func testReadyParses() throws {
         XCTAssertEqual(try XCTUnwrap(ManagerEvent.parse(Data(#"{"event":"ready"}"#.utf8))).event, .ready)
     }

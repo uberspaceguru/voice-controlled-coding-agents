@@ -44,6 +44,11 @@ public struct ManagerEvent: Codable, Equatable, Sendable {
         /// One line of the exchange, whole, with its role and kind (hf-20,
         /// hf-26). The ledger records it; the orb has nothing to show for it.
         case said
+        /// A turn addressed to a right-hand by name ("Yobi1, …"), handed to
+        /// the app (25 Sep): `session` is the hand's, `text` the words, `name`
+        /// the hand's. The app asks the hand's brain and speaks the answer on
+        /// that hand's card. Sent only to a host that sets TB_RIGHT_HAND_CARDS.
+        case ask
     }
     public var event: Kind
     public var t: Double?
@@ -174,6 +179,10 @@ public enum ManagerConfig {
         // script that overwrites TB_URL_SCHEME inside the child still wins,
         // which is the one place left for a link to go to the wrong lane.
         env["TB_URL_SCHEME"] = scheme
+        // This app speaks a right-hand's answer on the hand's own card, so
+        // the manager hands it "Director, …", "Yobi1, …" (`ManagerEvent.ask`)
+        // instead of answering in its own voice (25 Sep).
+        env["TB_RIGHT_HAND_CARDS"] = "1"
         // An app with its own data folder hands it to the child, so the
         // `tbase` it runs reads this app's store and never Prod's (25 Sep).
         if AppIdentity.supportFolderName != nil {

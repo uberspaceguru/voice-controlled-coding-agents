@@ -162,3 +162,23 @@ A preview must also own the scheme while it runs: LaunchServices sends a link
 to the scheme's default app and launches it if needed, and the default for
 `tranquilitybase://` is Prod. With Prod stopped, a hail to the old scheme
 starts Prod.
+
+## Talking to a right-hand by name (25 Sep)
+
+In Tranquility Base Director each right-hand is addressed by name, not through
+Tranquility: "Director, …", "Yobi1, …", "Sys-3PO, …". The voice manager
+(`director_link.route`) recognises the name as the transcriber writes it and,
+because this app sets `TB_RIGHT_HAND_CARDS=1`, hands the turn over as a
+`ManagerEvent.ask` (the hand's session, name and words). The app asks the
+hand's brain (`askBrain`) and speaks the answer on that hand's card.
+
+| Hand | Brain (`ask`) |
+|---|---|
+| Director | `director ask "{text}" --channel tranquility --external-id {conversation}` |
+| Yobi1 | `brains/yobi1-ask`: Yobi1 Fable's `--compose "<text>"` (it has no URL scheme or ask command), card line cut to two sentences |
+| Sys-3PO | `brains/sys3po-ask`: health and "what needs me" from `s3po-health status`; anything else typed into its pane with `director send`, the reply read back from its transcript |
+| TeamChat Manager | none: a greyed placeholder that says it isn't connected yet |
+
+`scripts/install-director.sh` copies the brains into the app's own folder on
+every install and gives Yobi1 and Sys-3PO their `ask` in that folder's roster
+when they have none. Prod's roster is never touched.

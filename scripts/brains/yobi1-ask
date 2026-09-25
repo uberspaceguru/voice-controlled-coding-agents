@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""yobi1-ask "<text>": ask the Yobi1 Fable app and print its answer (25 Sep).
+
+The right-hand "Yobi1" in right-hands.json asks through this. Yobi1 Fable
+has no URL scheme and no ask command; its one entry point is the app's own
+`--compose "<text>"`, which runs one composed turn in a fresh process and
+prints the card it would speak ("card: …"). This prints that card, cut to
+two plain sentences, and nothing else. Exit 1 with a reason on stderr when
+there is no answer.
+
+YOBI1_BIN overrides the binary.
+"""
+import os
+import re
+import subprocess
+import sys
+
+CANDIDATES = [
+    os.getenv("YOBI1_BIN", ""),
+    "~/Code/_Projects/Yobi1/yobi1-fable/dist/Yobi1 Fable.app/Contents/MacOS/Yobi1",
+    "/Applications/Yobi1 Fable.app/Contents/MacOS/Yobi1",
+]
+
+
+def binary():
+    for c in CANDIDATES:
+        p = os.path.expanduser(c)
+        if c and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+def plain(text, sentences=2, cap=320):
+    """One or two plain sentences: no markdown, no list marks, no line breaks."""
+    t = re.sub(r"[`*_#>|]+", "", text or "")
+    t = re.sub(r"^\s*(?:[-•]|\d+[.)])\s+", "", t, flags=re.M)
+    t = " ".join(t.split())
+    parts = re.split(r"(?<=[.?!])\s+", t)
+    out = " ".join(parts[:sentences]).strip()
+    if len(out) > cap:
+        out = out[:cap].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return out
+
+
+def main(argv):
+    text = " ".join(argv[1:]).strip()
+    if not text:
+        print("usage: yobi1-ask <text>", file=sys.stderr)
+        return 2
+    exe = binary()
+    if not exe:
+        print("Yobi1 Fable is not built on this Mac", file=sys.stderr)
+        return 1
+    try:
+        out = subprocess.run([exe, "--compose", text], capture_output=True, text=True,
+                             timeout=float(os.getenv("YOBI1_TIMEOUT", "45"))).stdout
+    except subprocess.TimeoutExpired:
+        print("Yobi1 took too long", file=sys.stderr)
+        return 1
+    card = next((ln[len("card:"):].strip() for ln in out.splitlines() if ln.startswith("card:")), "")
+    if not card:
+        print("Yobi1 answered nothing", file=sys.stderr)
+        return 1
+    print(plain(card))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""sys3po-ask "<text>": ask Sys-3PO and print its answer (25 Sep).
+
+The right-hand "Sys-3PO" in right-hands.json asks through this.
+
+- A question about the Mac's health, or what needs you, is answered by
+  `s3po-health status` (Sys-3PO's own tool; it reads, it never acts).
+- Anything else goes to Sys-3PO itself: `director send` types it into its
+  pane (the one way to send, with a receipt), and the reply is read back from
+  its session transcript when its turn ends. No reply within the wait prints
+  that it is working on it; the answer stays in its pane.
+
+Prints one or two plain sentences. Exit 1 with a reason on stderr on failure.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+SESSION = os.getenv("S3PO_SESSION", "2b973845-36c8-4c7d-8d31-18b6bc13821c")
+AGENT = os.getenv("S3PO_AGENT", "S3PO-macbook")
+SOCKET = os.getenv("S3PO_SOCKET", "fleet")
+TRANSCRIPT = os.path.expanduser(os.getenv(
+    "S3PO_TRANSCRIPT",
+    f"~/.claude/projects/-Users-ahmed-Code-myAgents-sys3po-ITguru/{SESSION}.jsonl"))
+WAIT = float(os.getenv("S3PO_WAIT", "50"))
+
+HEALTH = re.compile(
+    r"(?i)\b(health|healthy|slow|memory|ram|swap|disk|cpu|pressure|status|how(?:'s| is) (?:the |my )?mac|"
+    r"what needs me|anything (?:wrong|for me)|how are (?:we|things)|what(?:'s| is) up)\b")
+
+
+def tool(name):
+    return shutil.which(name) or os.path.expanduser(f"~/.local/bin/{name}")
+
+
+def plain(text, sentences=2, cap=320):
+    t = re.sub(r"[`*_#>|]+", "", text or "")
+    t = re.sub(r"^\s*(?:[-•]|\d+[.)])\s+", "", t, flags=re.M)
+    t = " ".join(t.split())
+    parts = re.split(r"(?<=[.?!])\s+", t)
+    out = " ".join(parts[:sentences]).strip()
+    if len(out) > cap:
+        out = out[:cap].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return out
+
+
+def health():
+    """`s3po-health status`: its verdict line, without the tag and the age."""
+    r = subprocess.run([tool("s3po-health"), "status"], capture_output=True, text=True, timeout=30)
+    lines = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+    if r.returncode not in (0, 1, 2) or not lines:
+        return None
+    head = re.sub(r"^\w+:\s*(?:\w+:\s*)?", "", lines[0])      # "OK: ok: pressure …" -> "pressure …"
+    head = re.sub(r"\s*\[[^\]]*ago\]\s*$", "", head)
+    head = head[:1].upper() + head[1:]
+    line = f"The Mac is fine: {head}." if lines[0].upper().startswith("OK") else f"{head}."
+    alert = next((ln for ln in lines[1:] if ln.lower().startswith(("alert", "warn", "!"))), None)
+    return plain(line + (" " + alert if alert else ""))
+
+
+def entries(path, start):
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            data = fh.read()
+    except OSError:
+        return []
+    out = []
+    for raw in data.splitlines():
+        try:
+            out.append(json.loads(raw))
+        except ValueError:
+            pass
+    return out
+
+
+def assistant_text(entry):
+    if entry.get("type") != "assistant":
+        return ""
+    content = (entry.get("message") or {}).get("content") or []
+    if isinstance(content, str):
+        return content
+    return "\n".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
+
+
+def ask_pane(text):
+    start = os.path.getsize(TRANSCRIPT) if os.path.exists(TRANSCRIPT) else 0
+    r = subprocess.run([tool("director"), "send", "--socket", SOCKET, AGENT, text],
+                       capture_output=True, text=True, timeout=40)
+    if r.returncode != 0:
+        print(f"director send failed: {(r.stderr or r.stdout).strip()[:200]}", file=sys.stderr)
+        return None
+    deadline = time.time() + WAIT
+    while time.time() < deadline:
+        time.sleep(1.5)
+        new = entries(TRANSCRIPT, start)
+        ended = any(e.get("type") == "system" and e.get("subtype") in ("turn_duration", "stop_hook_summary")
+                    for e in new)
+        said = [t for t in (assistant_text(e) for e in new) if t.strip()]
+        if ended and said:
+            return plain(said[-1])
+    return "Sys-3PO is working on it; the answer will be in its pane."
+
+
+def main(argv):
+    text = " ".join(argv[1:]).strip()
+    if not text:
+        print("usage: sys3po-ask <text>", file=sys.stderr)
+        return 2
+    line = health() if HEALTH.search(text) else ask_pane(text)
+    if not line:
+        print("Sys-3PO answered nothing", file=sys.stderr)
+        return 1
+    print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
