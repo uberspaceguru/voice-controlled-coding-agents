@@ -118,6 +118,24 @@ class DialogueManagerMixin(MemoryManagerMixin):
         t0 = time.monotonic()
         settled = False
         try:
+            # DIRECTOR FIRST (24 Sep). What is Director's goes to Director before
+            # any judgment: "Director, …", what needs him, what is ready, telling
+            # an agent something. Who the voice is, it answers itself. Neither
+            # costs a Jev call, and neither can be judged into "silent".
+            import director_link
+            routed = director_link.route(text)
+            if routed is not None:
+                settled = True
+                self._judging = None
+                self._input_ready.set()
+                note("you", text, "understood")
+                self.addressed += 1
+                await emit(self, "addressed", intent="director_" + routed[0], text=text[:120])
+                if routed[0] == "identity":
+                    await self._say(director_link.IDENTITY_LINE, response_mode="receipt")
+                else:
+                    await self._relay_director(routed[1])
+                return
             targets = await self._targets()
             self._require_current()
             self.dialogue.sync(guard.stage, targets)

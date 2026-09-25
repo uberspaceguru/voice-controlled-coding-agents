@@ -46,6 +46,9 @@ def make_manager():
     m.stage = TARGETS[0].copy()
     m.dialogue.sync("alpha", TARGETS)
     m._targets = AsyncMock(return_value=TARGETS)
+    # No Director on a test machine: the fleet falls back to this process's own
+    # list, which is the path these tests pin (director_link has its own tests).
+    m._director_inventory = AsyncMock(return_value=None)
     m._brief = AsyncMock(return_value={"sessionId": "alpha", "eventId": "one", "lastAssistantMessage": "Command: `git status`"})
     m._jev = AsyncMock()
     m._jev.ask.return_value = judgment()

@@ -578,7 +578,47 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             labels.append(label or f"unnamed agent {len(labels) + 1}")
         return labels
 
+    async def _relay_director(self, words: str):
+        """`director ask`, and Director's line spoken as it came back, prefixed
+        "Director:" so the ear knows who is talking. The voice never answers for
+        Director and never rewords it."""
+        import director_link
+        await emit(self, "tool", argv=["director", "ask", words[:80]], meaning="asking Director")
+        code, out = await _run(*director_link.ask_argv(words), timeout=60)
+        reply = director_link.flatten(out) if code == 0 else ""
+        if not reply:
+            logger.error(f"director ask failed ({code}): {out[-300:]}")
+            await self._say("Director didn't answer just now.", response_mode="receipt")
+            return
+        note("Director", reply, "spoken")
+        first = True
+        for part in director_link.chunks(reply):
+            line = ("Director: " + part) if first else part
+            first = False
+            if await self._say(line, voice="director", response_mode="detail") is not True:
+                return
+            self._require_current()
+
+    async def _director_inventory(self) -> str | None:
+        """The fleet as Director sees it (right-hands and counts), or None."""
+        import director_link
+        code, out = await _run(director_link.director_bin(), "--json", "status", timeout=30)
+        try:
+            status = json.loads(out) if code == 0 else None
+        except ValueError:
+            status = None
+        if not isinstance(status, dict):
+            return None
+        return director_link.inventory(status, director_link.right_hands())
+
     async def _fleet_inventory(self, *, include_names=True):
+        # The fleet is Director's (24 Sep): the right-hands and Director's
+        # counts, never this process's own list of every live pane.
+        line = await self._director_inventory()
+        self._require_current()
+        if line:
+            await self._say(line, response_mode="detail")
+            return
         targets = await self._targets()
         self._require_current()
         labels = self._fleet_labels(targets)
@@ -610,6 +650,16 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         await self._say(chunk.strip(), response_mode="detail")
 
     async def _manager_question(self, text):
+        fleet = await self._director_inventory()
+        if fleet:
+            # Director's view of the fleet, not this process's list of panes.
+            scope = {"who_you_are": "Tranquility, the voice. Not Director, not a fleet manager. "
+                                    "Director runs the agents and answers through you when addressed by name.",
+                     "fleet": fleet, "capabilities": self.CAPABILITIES}
+            answer = await self._brain.plain(text, [], scope=scope)
+            self._require_current()
+            await self._say(answer or fleet)
+            return
         targets = await self._targets()
         self._require_current()
         labels = self._fleet_labels(targets)
