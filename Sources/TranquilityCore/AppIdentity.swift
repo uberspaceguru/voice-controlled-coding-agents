@@ -9,6 +9,9 @@ public enum AppChannel: String, Sendable {
     case production
     case development
     case test
+    /// Tranquility Base Director (25 Sep): the right-hands app, installed
+    /// beside Prod as a separate application, never a lane that replaces it.
+    case director
 }
 
 public enum AppIdentity {
@@ -31,6 +34,36 @@ public enum AppIdentity {
         (Bundle.main.object(forInfoDictionaryKey: "TBUpdatesEnabled") as? Bool) ?? true
     }
 
+    // MARK: - What an identity shares with Prod (25 Sep)
+    //
+    // Each is an Info.plist key that only a non-production bundle sets, so Prod
+    // and Dev read the defaults and behave exactly as before. Tranquility Base
+    // Director sets all of them: it runs BESIDE Prod, so it must not take
+    // Prod's folder, Option key, links, hooks or preferences.
+
+    private static func info(_ key: String) -> Any? { Bundle.main.object(forInfoDictionaryKey: key) }
+
+    /// The data folder's name under Application Support. "VoiceDispatch" is Prod's.
+    public static var supportFolderName: String? { info("TBSupportFolder") as? String }
+
+    /// Whether this build installs the global hotkey tap (Option and friends).
+    /// Off, it needs neither Accessibility nor Input Monitoring.
+    public static var hotkeysEnabled: Bool { (info("TBHotkeys") as? Bool) ?? true }
+
+    /// Whether this build makes itself the handler for Prod's link schemes on
+    /// launch. Prod and Dev must (they are lanes of one product); an app
+    /// beside Prod must not, or Prod's links would open it instead.
+    public static var claimsProductSchemes: Bool {
+        (info("TBClaimsProductSchemes") as? Bool) ?? (channel != .test)
+    }
+
+    /// Whether this build repairs the Claude Code and Codex hooks on launch.
+    /// The hooks feed Prod's folder; only Prod's lanes may rewrite them.
+    public static var managesHooks: Bool { (info("TBManagesHooks") as? Bool) ?? true }
+
+    /// The scheme this build names as its own, when it has one of its own.
+    public static var ownScheme: String? { info("TBOwnScheme") as? String }
+
     public static var databaseSchemaVersion: Int {
         (Bundle.main.object(forInfoDictionaryKey: "TBDatabaseSchemaVersion") as? Int) ?? 18
     }
@@ -49,9 +82,13 @@ public enum AppIdentity {
     /// the developer's launcher did on 23 Sep, reached nothing at all: Prod
     /// does not claim it. Pure over the list so it is testable without a
     /// bundle.
-    public static var urlScheme: String { preferredScheme(among: urlSchemes, channel: channel) }
+    public static var urlScheme: String {
+        preferredScheme(among: urlSchemes, channel: channel, own: ownScheme)
+    }
 
-    static func preferredScheme(among schemes: [String], channel: AppChannel) -> String {
+    static func preferredScheme(among schemes: [String], channel: AppChannel,
+                                own: String? = nil) -> String {
+        if let own, schemes.contains(own) { return own }
         if channel == .development, schemes.contains("tbdev") { return "tbdev" }
         if schemes.contains("tranquilitybase") { return "tranquilitybase" }
         return schemes.first ?? "tranquilitybase"
@@ -66,7 +103,13 @@ public enum AppIdentity {
 /// bookkeeping deliberately stay in standard defaults; they belong to one
 /// identity and must not leak into the other.
 public enum ProductDefaults {
-    public static let suiteName = "com.robertnowell.voice-dispatch.shared"
+    /// Prod and Dev share one suite on purpose (see above). An app beside Prod
+    /// names its own (`TBDefaultsSuite`), so its panel position, microphone
+    /// choice and toggles never move Prod's.
+    public static var suiteName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "TBDefaultsSuite") as? String)
+            ?? "com.robertnowell.voice-dispatch.shared"
+    }
 
     public static var shared: UserDefaults {
         // `suiteName` is fixed and valid. The fallback makes command-line test

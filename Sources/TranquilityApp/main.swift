@@ -486,7 +486,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // simply by launching the chosen lane: switch-app starts it here and it
         // becomes the handler. TEST deliberately keeps only tbtest and never
         // changes a real report's association.
-        if AppIdentity.channel != .test {
+        // An app BESIDE Prod (Tranquility Base Director, 25 Sep) never takes
+        // Prod's links: it has its own scheme, and taking these would send
+        // every report button and every hail to it instead of to Prod.
+        if AppIdentity.claimsProductSchemes {
             for scheme in ["tranquilitybase", "voicedispatch"] {
                 let status = LSSetDefaultHandlerForURLScheme(
                     scheme as CFString, AppIdentity.bundleIdentifier as CFString)
@@ -1800,7 +1803,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             + "\(split.cloud) ElevenLabs + \(split.system) system voices")
         }
 
-        if let problem = HookManifest.machineSummary() {
+        // The hooks feed Prod's folder. An app with a folder of its own never
+        // rewrites them (25 Sep); it says so once instead.
+        if !AppIdentity.managesHooks {
+            Permissions.log("startup: hooks are Prod's; this build does not repair them")
+        } else if let problem = HookManifest.machineSummary() {
             // Repair, not just report (Robert, 12 Aug: "nobody ever wants to
             // run a command — we either keep it up to date or give them one
             // click"). The repair is bounded to entries carrying our markers,
@@ -2150,7 +2157,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The real registration attempt for Input Monitoring, run from the
         // checklist's own Grant button. See `Permissions.startListening`'s
         // own doc comment for why this is needed at all.
-        Permissions.startListening = { [weak self] in _ = self?.hotkey?.start() }
+        Permissions.startListening = { [weak self] in
+            // No hotkey tap in a build that runs beside Prod: the Option key is Prod's.
+            guard AppIdentity.hotkeysEnabled else { return }
+            _ = self?.hotkey?.start()
+        }
 
         startPermissionPolling()
         startWatchingForRevokedPermissions()

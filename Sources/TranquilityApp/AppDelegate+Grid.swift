@@ -377,7 +377,10 @@ extension AppDelegate {
         // until the permission is granted, so the tap is still never created
         // speculatively and `tapCreate` still never pops its own dialog. It
         // just does not also require the outcome as its own precondition.
-        if !hotkey.isRunning, Permissions.isGranted(.inputMonitoring) {
+        // Tranquility Base Director never listens on the keyboard (25 Sep): it
+        // runs beside Prod, and Prod owns Option. Voice reaches it through
+        // hands-free and its own buttons.
+        if AppIdentity.hotkeysEnabled, !hotkey.isRunning, Permissions.isGranted(.inputMonitoring) {
             _ = hotkey.start()
         }
         rebuildMenu()

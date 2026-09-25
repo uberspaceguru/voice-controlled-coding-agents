@@ -174,6 +174,11 @@ public enum ManagerConfig {
         // script that overwrites TB_URL_SCHEME inside the child still wins,
         // which is the one place left for a link to go to the wrong lane.
         env["TB_URL_SCHEME"] = scheme
+        // An app with its own data folder hands it to the child, so the
+        // `tbase` it runs reads this app's store and never Prod's (25 Sep).
+        if AppIdentity.supportFolderName != nil {
+            env["VOICE_DISPATCH_SUPPORT_DIR"] = QueueStore.supportDirectory.path
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let extra = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
         env["PATH"] = (extra + (env["PATH"] ?? "").split(separator: ":").map(String.init)).joined(separator: ":")

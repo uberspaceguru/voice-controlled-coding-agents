@@ -331,7 +331,12 @@ public extension GridAssembler {
                 .placed(pinned: true)
         }
         if row.switchedOff { return row }
-        let lamp: Lamp = row.lamp.asksForYou ? .ready : (row.lamp == .unlit ? .unlit : .running)
+        // Director's word counts as "needs me" too: an app with no hooks of
+        // its own has no waiting turns to light a dot, and Director watches
+        // every session.
+        let directorSays = input.cards.values.contains { $0.needsSessions.contains(row.id) }
+        let lamp: Lamp = (row.lamp.asksForYou || directorSays) ? .ready
+            : (row.lamp == .unlit ? .unlit : .running)
         return SessionRow(id: row.id, name: name, aux: "", lamp: lamp, revivable: row.revivable,
                           read: lamp == .ready ? .unread : row.read,
                           detail: row.detail ?? row.aux, harness: row.harness,

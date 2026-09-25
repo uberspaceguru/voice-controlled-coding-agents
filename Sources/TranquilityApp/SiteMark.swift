@@ -178,13 +178,14 @@ enum SiteMark {
     /// be mistaken in the Dock or Cmd-Tab. The executable itself remains the
     /// same across all three bundles.
     private enum IconVariant {
-        case production, development, test
+        case production, development, test, director
     }
 
     private static var iconVariant: IconVariant {
         switch ProcessInfo.processInfo.environment["VOICE_DISPATCH_ICON_VARIANT"] {
         case "development": return .development
         case "test": return .test
+        case "director": return .director
         default: return .production
         }
     }
@@ -200,6 +201,8 @@ enum SiteMark {
             case .production: StateLegend.Palette.surface
             case .development: StateLegend.Palette.working
             case .test: StateLegend.Palette.fault
+            // Tranquility Base Director: green, the right-hands' "needs me" dot.
+            case .director: StateLegend.Palette.ready
             }
             plateColour.setFill()
             NSBezierPath(roundedRect: plate, xRadius: 185.4 * unit,

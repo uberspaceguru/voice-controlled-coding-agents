@@ -66,6 +66,27 @@ DATABASE_SCHEMA_VERSION="${VD_DATABASE_SCHEMA_VERSION:-$(sed -nE 's/.*registerMi
 [ -n "$DATABASE_SCHEMA_VERSION" ] || { echo "✗ no migrations found in QueueStore.swift" >&2; exit 1; }
 URL_SCHEMES="${VD_URL_SCHEMES:-tranquilitybase voicedispatch}"
 
+# What a build shares with Prod (AppIdentity, 25 Sep). Unset for Prod and Dev,
+# which therefore read exactly the defaults they always had; bundle-director.sh
+# sets them all, because that app runs BESIDE Prod.
+IDENTITY_KEYS_XML=""
+tb_plist_string() { [ -n "$2" ] && IDENTITY_KEYS_XML="${IDENTITY_KEYS_XML}  <key>$1</key><string>$2</string>
+"; return 0; }
+tb_plist_bool() {
+  case "$2" in
+    true|false) IDENTITY_KEYS_XML="${IDENTITY_KEYS_XML}  <key>$1</key><$2/>
+" ;;
+    "") ;;
+    *) echo "✗ $1 must be true or false" >&2; exit 1 ;;
+  esac
+}
+tb_plist_string TBSupportFolder "${VD_SUPPORT_FOLDER:-}"
+tb_plist_string TBOwnScheme "${VD_OWN_SCHEME:-}"
+tb_plist_string TBDefaultsSuite "${VD_DEFAULTS_SUITE:-}"
+tb_plist_bool TBHotkeys "${VD_HOTKEYS:-}"
+tb_plist_bool TBClaimsProductSchemes "${VD_CLAIMS_PRODUCT_SCHEMES:-}"
+tb_plist_bool TBManagesHooks "${VD_MANAGES_HOOKS:-}"
+
 case "$UPDATES_ENABLED" in
   true) UPDATES_BOOL_XML="<true/>" ;;
   false) UPDATES_BOOL_XML="<false/>" ;;
@@ -291,7 +312,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
        bytes to the exact source commit the automated release built. Unlike the
        marketing version it is never chosen or rewritten by a release job. -->
   <key>TBSourceCommit</key><string>$SOURCE_COMMIT</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+$IDENTITY_KEYS_XML  <key>LSMinimumSystemVersion</key><string>14.0</string>
 
   <!-- Sparkle. SURequireSignedFeed means the appcast DOCUMENT is signed, not
        just each download: per-enclosure signatures prove the bytes you fetched
@@ -436,7 +457,7 @@ else
   # that build, and only then, is re-signed with the one extra key; any build
   # with a Team ID keeps library validation. See TranquilityBaseDev.entitlements.
   TEAM=$(codesign -dv "$APP_DIR" 2>&1 | sed -n 's/^TeamIdentifier=//p')
-  if [ "$APP_CHANNEL" = development ] && [ "${TEAM:-not set}" = "not set" ]; then
+  if { [ "$APP_CHANNEL" = development ] || [ "$APP_CHANNEL" = director ]; } && [ "${TEAM:-not set}" = "not set" ]; then
     codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" \
       --entitlements TranquilityBaseDev.entitlements \
       --options runtime --timestamp=none "$APP_DIR"

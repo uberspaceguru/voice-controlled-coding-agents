@@ -41,6 +41,18 @@ extension Coordinator {
         return try store.mostRecentlyHeard(since: cutoff)
     }
 
+    /// A session the store knows, or a right-hand with a brain it has never
+    /// stored a turn for. Director is a command, and an app with its own data
+    /// folder may never have seen a Stop from it; what is said to it still
+    /// has somewhere to go (25 Sep).
+    func knownOrBrain(_ sessionId: String) throws -> WaitingSession? {
+        if let known = try store.allKnownSessions().first(where: { $0.sessionId == sessionId }) {
+            return known
+        }
+        guard hand(forSession: sessionId, cwd: nil)?.asks == true else { return nil }
+        return WaitingSession(sessionId: sessionId, latestId: 0, createdAtMs: 0, hookEvent: .stop)
+    }
+
     // MARK: - Reply
 
     public enum ReplyOutcome: Sendable {
@@ -152,8 +164,7 @@ extension Coordinator {
     ) async throws -> ReplyOutcome {
         let target: WaitingSession?
         if let sessionId {
-            target = try store.allKnownSessions()
-                .first { $0.sessionId == sessionId }
+            target = try knownOrBrain(sessionId)
         } else {
             target = try replyTarget()
         }
@@ -242,8 +253,7 @@ extension Coordinator {
                                  tray: TrayScope = .session,
                                  provider: String = "typed") async throws -> ReplyOutcome {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let target = try store.allKnownSessions().first(where: { $0.sessionId == sessionId })
-        else { return .noTarget }
+        guard let target = try knownOrBrain(sessionId) else { return .noTarget }
         let carrying: Bool = {
             switch tray {
             case .session: return !attachments.staged(for: target.sessionId).isEmpty
@@ -287,8 +297,7 @@ extension Coordinator {
         guard var utterance = try store.utterances(limit: 500).first(where: { $0.id == utteranceId }),
               let text = utterance.transcriptText,
               let sessionId = utterance.targetSessionId,
-              let target = try store.allKnownSessions()
-                  .first(where: { $0.sessionId == sessionId })
+              let target = try knownOrBrain(sessionId)
         else {
             // A confirm with nowhere to go: whatever this utterance was
             // carrying goes back to the chips rather than riding a ghost.

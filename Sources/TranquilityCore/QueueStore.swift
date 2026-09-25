@@ -40,7 +40,19 @@ public final class QueueStore: Sendable {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("VoiceDispatch", isDirectory: true)
+        return base.appendingPathComponent(supportFolder(named: AppIdentity.supportFolderName),
+                                           isDirectory: true)
+    }
+
+    /// The folder name under Application Support: Prod's "VoiceDispatch"
+    /// unless the bundle names its own (`TBSupportFolder`, 25 Sep: Tranquility
+    /// Base Director keeps "VoiceDispatch-Director"). Only a plain name is
+    /// honoured; anything with a path in it is ignored for Prod's.
+    static func supportFolder(named name: String?) -> String {
+        guard let name, !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else {
+            return "VoiceDispatch"
+        }
+        return name
     }
 
     public static var databaseURL: URL {

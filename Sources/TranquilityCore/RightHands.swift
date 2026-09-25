@@ -488,13 +488,18 @@ public enum RightHands {
         /// How many things need the user across the whole source, not only
         /// the five shown. The row's dot, and the accordion's first line.
         public var needsYou: Int
+        /// The sessions Director says need the user, by session id: a hand's
+        /// dot when nothing else feeds this app its turns (25 Sep, the
+        /// Director app has no hooks of its own).
+        public var needsSessions: Set<String>
 
         public init(projects: [Project], updatedAt: String? = nil, totals: String? = nil,
-                    needsYou: Int? = nil) {
+                    needsYou: Int? = nil, needsSessions: Set<String> = []) {
             self.projects = projects
             self.updatedAt = updatedAt
             self.totals = totals
             self.needsYou = needsYou ?? projects.filter { $0.state == .needsYou }.count
+            self.needsSessions = needsSessions
         }
 
         public static func load(path: String) -> Rollup? {
@@ -569,7 +574,8 @@ public enum RightHands {
             }
             return Rollup(projects: Array(projects.prefix(limit)),
                           totals: parts.isEmpty ? nil : parts.joined(separator: ", ") + ".",
-                          needsYou: rows("needs_you").count)
+                          needsYou: rows("needs_you").count,
+                          needsSessions: Set(rows("needs_you").compactMap { $0["session_id"] as? String }))
         }
 
         /// One sentence, at most about twenty words: a worker note can be a

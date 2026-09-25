@@ -136,7 +136,16 @@ struct Permissions {
         /// every kind here including Automation, whose prompt this app is the
         /// only thing that can trigger. The cost of requiring is one more row
         /// to grant once. The cost of hedging was tonight.
-        var isRequired: Bool { true }
+        /// All of them, except the two only the hotkey tap needs, in a build
+        /// that has no hotkey tap (Tranquility Base Director, 25 Sep): it can
+        /// never be stuck on "granted, restart to finish" for a key it does
+        /// not listen to.
+        var isRequired: Bool {
+            switch self {
+            case .accessibility, .inputMonitoring: return AppIdentity.hotkeysEnabled
+            default: return true
+            }
+        }
 
         var settingsURL: String {
             let base = "x-apple.systempreferences:com.apple.preference.security?"
