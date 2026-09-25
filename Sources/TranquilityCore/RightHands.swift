@@ -690,6 +690,15 @@ public enum RightHands {
             return summary(card) + "; first, " + Rollup.sentence(what)
         }
 
+        /// What a tap on one item ASKS the hand (25 Sep): Director's
+        /// `explain_item` intent reads the item and never types into a pane.
+        /// By name, not by number: the accordion's items come from
+        /// `director --json status`, whose order need not match the numbered
+        /// list Director last showed this thread, and a name binds either way.
+        public static func explainRequest(_ project: Rollup.Project) -> String {
+            "tell me more about \(project.name)"
+        }
+
         /// What a tap on one item speaks: whose it is, and what it needs.
         public static func itemSentence(_ project: Rollup.Project) -> String {
             let state: String

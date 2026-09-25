@@ -127,6 +127,8 @@ final class RightHandsPanelTests: XCTestCase {
         XCTAssertEqual(A.sentence(card), "5 things need you; first, Wispr: Decision on the insertion fix.")
         XCTAssertEqual(A.itemSentence(card.projects[0]), "Wispr needs you. Decision on the insertion fix.")
         XCTAssertEqual(A.itemSentence(card.projects[2]), "To-do list needs you.")
+        XCTAssertEqual(A.explainRequest(card.projects[0]), "tell me more about Wispr",
+                       "by name, so it binds whatever order Director last listed things in")
         XCTAssertEqual(A.summary(RightHands.Rollup(projects: [], needsYou: 1)), "1 thing needs you")
         XCTAssertEqual(A.sentence(RightHands.Rollup(projects: [], needsYou: 0)), "Nothing needs you.")
     }

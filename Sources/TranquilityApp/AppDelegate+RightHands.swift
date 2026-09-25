@@ -68,7 +68,16 @@ extension AppDelegate {
                   n >= 1, n <= card.projects.count else { return }
             let project = card.projects[n - 1]
             Permissions.log("right-hands: \(name) item \(n) (\(project.name)) opened")
-            speakOnCard(RightHands.Accordion.itemSentence(project), as: parent, name: name)
+            // Tap-to-explain (25 Sep): the hand explains the item in plain
+            // words, and the item is then in focus in its thread, so a "yes"
+            // said next answers it. If the hand cannot answer, the card reads
+            // the item's own line instead of going quiet.
+            if RightHands.hand(for: parent)?.asks == true {
+                askBrain(RightHands.Accordion.explainRequest(project), of: parent, name: name,
+                         fallback: RightHands.Accordion.itemSentence(project))
+            } else {
+                speakOnCard(RightHands.Accordion.itemSentence(project), as: parent, name: name)
+            }
         case .more, .summary:
             askBrain("what needs me?", of: parent, name: name)
         }
@@ -85,7 +94,7 @@ extension AppDelegate {
 
     /// Ask the hand's brain and speak its answer on its card. Off the main
     /// thread: the brain is a subprocess.
-    func askBrain(_ text: String, of id: String, name: String) {
+    func askBrain(_ text: String, of id: String, name: String, fallback: String? = nil) {
         guard let hand = RightHands.hand(for: id), hand.asks else { return }
         Permissions.log("right-hands: asking \(name): \(text.prefix(80))")
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -95,7 +104,8 @@ extension AppDelegate {
                 case .success(let line): self?.speakOnCard(line, as: id, name: name)
                 case .failure(let why):
                     Permissions.log("right-hands: \(name) did not answer: \(why)")
-                    self?.hud.showResult("\(name) didn't answer just now.")
+                    if let fallback { self?.speakOnCard(fallback, as: id, name: name) }
+                    else { self?.hud.showResult("\(name) didn't answer just now.") }
                 }
             }
         }

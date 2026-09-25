@@ -35,10 +35,11 @@ roster exists (`docs/right-hands.md`); with no roster the panel is as before.
 8. **A spoken Director line is Director's own words** (its card or its hail),
    never a model's paraphrase of its turn.
 
-## What is not done on this side
+## Tap-to-explain (25 Sep)
 
-An item tap does not yet ask Director to explain the item. Director's `ask`
-binds "item 2" and a named agent to `answer_open_item`, which types "Ahmed
-answers: …" into that worker's pane, so "tell me more about item 2" would
-answer the worker instead of explaining it to the user. The tap speaks
-Director's own line for the item until Director has an explain intent.
+An item tap asks Director `tell me more about <agent>` in the card's thread. Director's
+`explain_item` intent (shipped 25 Sep) reads the item and never types into a pane, and
+the item is then in focus, so a "yes" said next answers it. The request names the agent
+rather than a number, because the accordion's items come from `director --json status`
+and Director numbers the list it last showed that thread. If Director does not answer,
+the card reads the item's own line.
