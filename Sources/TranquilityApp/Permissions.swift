@@ -611,6 +611,11 @@ struct Permissions {
     /// second helping of the first one.
     static func state(_ kind: Kind) -> State {
         if let forced = previewStates?[kind] { return forced }
+        // A row this build does not ask for has no restart to wait on: with no
+        // hotkey tap, a granted Input Monitoring can never be "listening", and
+        // reading that as "restart to finish" would write a note for a restart
+        // nothing needs (25 Sep, the Director app's first launch).
+        if !kind.isRequired, rawState(kind) == .pendingRestart { return .active }
         let raw = rawState(kind)
         let askedBeforeThisProcess = (restartAskedAt(kind).map { $0 < launchedAt }) ?? false
 
