@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let forwardedDeepLink = Notification.Name(
         "com.robertnowell.tranquilitybase.forwarded-deep-link")
     var permissionTimer: Timer?
+    /// The Director app's local key monitor; see `HotkeyMonitor.feed`.
+    var localKeys: Any?
     var intakeTimer: Timer?
     /// The intake beat, callable out of turn (a remote turn landing).
     var intakeBeat: (@Sendable () -> Void)?
@@ -2153,6 +2155,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Prod, by bundle id, for the Director app's optional Option hold.
+        AppIdentity.runningApps = { id in
+            NSRunningApplication.runningApplications(withBundleIdentifier: id).map(\.processIdentifier)
+        }
+        // The Director app's keys without Input Monitoring (25 Sep): while one
+        // of its windows has the keyboard, the app's own events feed the same
+        // gesture machine the tap does. `feed` ignores them whenever the tap runs.
+        if !AppIdentity.hotkeysEnabled {
+            localKeys = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
+                [weak self] event in
+                self?.hotkey?.feed(event)
+                return event
+            }
+        }
+
         // The checklist's restart question is answered by the live tap, not by
         // a table of which permissions "need a restart" — see `Permissions.State`.
         Permissions.listeningProbe = { [weak self] in self?.hotkey?.isListening ?? false }
@@ -2160,8 +2177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // checklist's own Grant button. See `Permissions.startListening`'s
         // own doc comment for why this is needed at all.
         Permissions.startListening = { [weak self] in
-            // No hotkey tap in a build that runs beside Prod: the Option key is Prod's.
-            guard AppIdentity.hotkeysEnabled else { return }
+            // No hotkey tap in a build that runs beside Prod while Prod runs:
+            // the Option key is Prod's.
+            guard AppIdentity.hotkeysEnabled
+                    || (AppIdentity.optionalHotkeys && !AppIdentity.prodIsRunning) else { return }
             _ = self?.hotkey?.start()
         }
 

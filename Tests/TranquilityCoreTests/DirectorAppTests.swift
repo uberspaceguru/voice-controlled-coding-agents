@@ -16,6 +16,24 @@ final class DirectorAppTests: XCTestCase {
         XCTAssertEqual(QueueStore.supportFolder(named: ".hidden"), "VoiceDispatch")
     }
 
+    /// Input Monitoring is optional in the Director app (25 Sep): its tap
+    /// runs only once granted and never beside Prod; Prod's own tap is
+    /// unchanged; a build with neither never listens.
+    func testTheOptionHoldNeverRunsBesideProd() {
+        XCTAssertTrue(AppIdentity.mayListenGlobally(granted: true, prodRunning: true,
+                                                    enabled: true, optional: false))
+        XCTAssertFalse(AppIdentity.mayListenGlobally(granted: false, prodRunning: false,
+                                                     enabled: true, optional: false))
+        XCTAssertTrue(AppIdentity.mayListenGlobally(granted: true, prodRunning: false,
+                                                    enabled: false, optional: true))
+        XCTAssertFalse(AppIdentity.mayListenGlobally(granted: true, prodRunning: true,
+                                                     enabled: false, optional: true))
+        XCTAssertFalse(AppIdentity.mayListenGlobally(granted: false, prodRunning: false,
+                                                     enabled: false, optional: true))
+        XCTAssertFalse(AppIdentity.mayListenGlobally(granted: true, prodRunning: false,
+                                                     enabled: false, optional: false))
+    }
+
     func testItsOwnSchemeWins() {
         XCTAssertEqual(AppIdentity.preferredScheme(among: ["tbdirector"], channel: .director, own: "tbdirector"),
                        "tbdirector")

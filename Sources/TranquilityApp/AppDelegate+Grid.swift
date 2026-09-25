@@ -379,11 +379,21 @@ extension AppDelegate {
         // until the permission is granted, so the tap is still never created
         // speculatively and `tapCreate` still never pops its own dialog. It
         // just does not also require the outcome as its own precondition.
-        // Tranquility Base Director never listens on the keyboard (25 Sep): it
-        // runs beside Prod, and Prod owns Option. Voice reaches it through
-        // hands-free and its own buttons.
-        if AppIdentity.hotkeysEnabled, !hotkey.isRunning, Permissions.isGranted(.inputMonitoring) {
-            _ = hotkey.start()
+        // Tranquility Base Director (25 Sep) runs beside Prod, and Prod owns
+        // Option. Its tap is optional: on only once Input Monitoring is
+        // granted, and only while Prod is not running. Prod starting stops it,
+        // between gestures; Prod quitting lets it start on the next tick.
+        let mayListen = AppIdentity.mayListenGlobally(
+            granted: Permissions.isGranted(.inputMonitoring),
+            prodRunning: AppIdentity.optionalHotkeys && AppIdentity.prodIsRunning)
+        if mayListen, !hotkey.isRunning {
+            let started = hotkey.start()
+            if !AppIdentity.hotkeysEnabled {
+                Permissions.log("hotkeys: global Option hold \(started ? "on" : "failed to start")")
+            }
+        } else if !mayListen, !AppIdentity.hotkeysEnabled, hotkey.isRunning, !hotkey.isPressed {
+            hotkey.stop()
+            Permissions.log("hotkeys: global Option hold off (Tranquility Base is running)")
         }
         rebuildMenu()
         updateTitle()

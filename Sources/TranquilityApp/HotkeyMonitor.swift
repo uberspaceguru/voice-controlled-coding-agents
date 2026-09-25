@@ -373,6 +373,16 @@ public final class HotkeyMonitor: @unchecked Sendable {
         return true
     }
 
+    /// A key event the app saw itself, through an NSEvent local monitor,
+    /// while it has the keyboard (25 Sep). The Director app runs without Input
+    /// Monitoring: no tap, so ⌃⌃ and the other gestures reach it only this way,
+    /// and only while one of its windows is key. Ignored whenever the tap runs,
+    /// which already sees every key, so nothing is counted twice.
+    public func feed(_ event: NSEvent) {
+        guard tap == nil, let cg = event.cgEvent else { return }
+        _ = handle(type: cg.type, event: cg)
+    }
+
     public func stop() {
         isPressed = false
         // Silent reset, no effects: stop() runs from deinit and app teardown,

@@ -26,6 +26,9 @@ export VD_OWN_SCHEME="tbdirector"
 export VD_SUPPORT_FOLDER="VoiceDispatch-Director"
 export VD_DEFAULTS_SUITE="com.robertnowell.voice-dispatch.director"
 export VD_HOTKEYS="false"
+# Opt-in, and never beside Prod: the global Option hold runs only if Input
+# Monitoring is granted and not skipped, and only while Prod is not running.
+export VD_HOTKEYS_OPTIONAL="true"
 export VD_CLAIMS_PRODUCT_SCHEMES="false"
 export VD_MANAGES_HOOKS="false"
 export TB_FEED_URL="https://updates.tranquilitybase.to/director-appcast.xml"

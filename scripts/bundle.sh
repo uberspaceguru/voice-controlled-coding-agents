@@ -84,6 +84,7 @@ tb_plist_string TBSupportFolder "${VD_SUPPORT_FOLDER:-}"
 tb_plist_string TBOwnScheme "${VD_OWN_SCHEME:-}"
 tb_plist_string TBDefaultsSuite "${VD_DEFAULTS_SUITE:-}"
 tb_plist_bool TBHotkeys "${VD_HOTKEYS:-}"
+tb_plist_bool TBHotkeysOptional "${VD_HOTKEYS_OPTIONAL:-}"
 tb_plist_bool TBClaimsProductSchemes "${VD_CLAIMS_PRODUCT_SCHEMES:-}"
 tb_plist_bool TBManagesHooks "${VD_MANAGES_HOOKS:-}"
 

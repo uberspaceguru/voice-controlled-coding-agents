@@ -50,6 +50,31 @@ public enum AppIdentity {
     /// Off, it needs neither Accessibility nor Input Monitoring.
     public static var hotkeysEnabled: Bool { (info("TBHotkeys") as? Bool) ?? true }
 
+    /// A build with no hotkey tap of its own that may still listen for the
+    /// global Option hold, opt-in, when the user grants Input Monitoring and
+    /// only while Prod is not running (25 Sep, Tranquility Base Director).
+    public static var optionalHotkeys: Bool { (info("TBHotkeysOptional") as? Bool) ?? false }
+
+    /// Whether the app may run its global hotkey tap now: Prod and Dev
+    /// whenever Input Monitoring is granted; the Director app only when it is
+    /// granted AND Prod is not running. A skip does not enter into it: the
+    /// skip only stops the checklist asking, and a grant made later still works.
+    public static func mayListenGlobally(granted: Bool, prodRunning: Bool,
+                                         enabled: Bool = hotkeysEnabled,
+                                         optional: Bool = optionalHotkeys) -> Bool {
+        guard granted else { return false }
+        if enabled { return true }
+        return optional && !prodRunning
+    }
+
+    /// Whether Prod (the published Tranquility Base) is running right now.
+    public static var prodIsRunning: Bool {
+        !runningApps("com.robertnowell.voice-dispatch").isEmpty
+    }
+    /// The seam: bundle id -> running pids. The app points it at
+    /// NSRunningApplication; Core has no AppKit.
+    public nonisolated(unsafe) static var runningApps: @Sendable (String) -> [Int32] = { _ in [] }
+
     /// Whether this build makes itself the handler for Prod's link schemes on
     /// launch. Prod and Dev must (they are lanes of one product); an app
     /// beside Prod must not, or Prod's links would open it instead.

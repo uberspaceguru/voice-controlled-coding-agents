@@ -13,6 +13,8 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     private var rows: [Permissions.Kind: NSTextField] = [:]
     private var details: [Permissions.Kind: NSTextField] = [:]
     private var grantButtons: [Permissions.Kind: NSButton] = [:]
+    /// Skip, on an optional row only (25 Sep: Input Monitoring in the Director app).
+    private var skipButtons: [Permissions.Kind: NSButton] = [:]
     private var doneButton: NSButton?
     private var restartButton: NSButton?
     private var progressLabel: NSTextField?
@@ -279,7 +281,11 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // there is nothing left to qualify. A parenthesis that quietly tells
         // the reader a step is skippable is how one of them ended up with no
         // row at all.
-        let name = NSTextField(labelWithString: "\(step). " + kind.title)
+        // The one exception is a row that really is optional (25 Sep): in the
+        // Director app Input Monitoring serves one feature, the global Option
+        // hold, and the app runs fully without it. There the word is true.
+        let name = NSTextField(labelWithString: "\(step). " + kind.title
+                                  + (kind.isOptional ? " · optional" : ""))
         name.font = ChromeType.mono(ofSize: 12, weight: .medium)
         name.textColor = StateLegend.Palette.ink
         name.drawsBackground = false
@@ -306,6 +312,14 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         grantButtons[kind] = button
         row.addArrangedSubview(button)
 
+        if kind.isOptional {
+            let skip = door("Skip", ink: StateLegend.Palette.secondary,
+                            action: #selector(skipTapped(_:)))
+            skip.identifier = NSUserInterfaceItemIdentifier(kind.title)
+            skipButtons[kind] = skip
+            row.addArrangedSubview(skip)
+        }
+
         return row
     }
 
@@ -319,6 +333,13 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
             Permissions.openSettings(for: kind)
             refresh()
         }
+    }
+
+    @objc private func skipTapped(_ sender: NSButton) {
+        guard let kind = Permissions.Kind.shown
+            .first(where: { $0.title == sender.identifier?.rawValue }) else { return }
+        Permissions.skip(kind)
+        refresh()
     }
 
     @objc private func doneTapped() { window?.close() }
@@ -527,7 +548,9 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // presented as the step you are on. It stays undimmed below — `live`
         // is true for anything that is not `active` — but it does not claim
         // to be what the checklist is waiting for, because it is not.
-        let current = states.first { !Permissions.opensTheGate($0.1) }?.0
+        let current = states.first {
+            !Permissions.opensTheGate($0.1) && !Permissions.isSkipped($0.0)
+        }?.0
 
         for (kind, state) in states {
             // The panel's own lamp vocabulary, and one meaning per colour.
@@ -545,7 +568,11 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
             // `denied` is amber too. It needs action exactly as much as an
             // untouched row does; what differs is WHICH action, and the detail
             // and the door beside it already say so.
+            let skipped = state != .active && Permissions.isSkipped(kind)
             rows[kind]?.textColor = {
+                // Skipped is finished business, not a fault: faint, like a row
+                // with nothing for the user to do.
+                if skipped { return StateLegend.Palette.faint }
                 switch state {
                 case .active: return StateLegend.Palette.ready
                 case .pendingRestart: return StateLegend.Palette.working
@@ -564,8 +591,11 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
             }()
             details[kind]?.textColor = state == .active
                 ? StateLegend.Palette.hint : StateLegend.Palette.secondary
-            details[kind]?.stringValue = Self.detail(kind, state)
+            details[kind]?.stringValue = kind.isOptional
+                ? Self.optionalDetail(kind, state, skipped: skipped)
+                : Self.detail(kind, state)
             grantButtons[kind]?.isHidden = (state == .active || state == .pendingRestart)
+            skipButtons[kind]?.isHidden = state == .active || skipped
             if let button = grantButtons[kind] as? ConsoleButton {
                 // `stale` keeps the Grant label, and the note tells you to press
                 // it by name. Briefly this said Open Settings on the reasoning
@@ -584,7 +614,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
             // Dim what is not the user's business yet, and never dim the row
             // they are on or a row that still needs them.
-            let live = (kind == current) || state != .active
+            let live = (kind == current) || (state != .active && !skipped)
             nameLabels[kind]?.alphaValue = live ? 1.0 : 0.45
             details[kind]?.alphaValue = live ? 1.0 : 0.45
         }
@@ -602,7 +632,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         let staleRows = Permissions.stale
         let pending = Permissions.pendingRestart
         let everythingElseDone = states.allSatisfy {
-            Permissions.opensTheGate($0.1) || $0.1 == .pendingRestart
+            Permissions.opensTheGate($0.1) || $0.1 == .pendingRestart || $0.0.isOptional
         }
         let readyToRestart = !pending.isEmpty && everythingElseDone
         restartNote?.isHidden = pending.isEmpty && staleRows.isEmpty
@@ -695,6 +725,19 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
             return "Click Grant, then switch \(AppIdentity.displayName) off and back on "
                 + "in Settings."
         }
+    }
+
+    /// An optional row says which feature it is for, in every state (25 Sep,
+    /// Director: "the checklist row says exactly which feature needs it").
+    static func optionalDetail(_ kind: Permissions.Kind, _ state: Permissions.State,
+                               skipped: Bool) -> String {
+        if state == .active {
+            return AppIdentity.prodIsRunning
+                ? "done. Option hold is off while Tranquility Base runs"
+                : "done. Hold Option anywhere to talk"
+        }
+        if skipped { return "skipped. Only the global Option hold needs it; Grant any time" }
+        return "only for holding Option anywhere to talk. Everything else works without it"
     }
 
     /// The live state text, in the user's terms rather than the API's.

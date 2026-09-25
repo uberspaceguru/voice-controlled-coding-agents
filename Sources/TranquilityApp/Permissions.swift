@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.hid
 import AVFoundation
 import Speech
 import CoreGraphics
@@ -65,7 +66,12 @@ struct Permissions {
             // unavailable — so without it a stalled cloud vendor means a reply
             // that never arrives at all.
             case .speechRecognition: return "so a reply still arrives when a transcription service stalls"
-            case .inputMonitoring: return "to notice the hotkeys while you're in another app (measured: Accessibility alone does NOT do this)"
+            case .inputMonitoring:
+                if isOptional {
+                    return "optional: only for holding Option anywhere to talk to Director, and only while "
+                        + "Tranquility Base is not running. Everything else works without it."
+                }
+                return "to notice the hotkeys while you're in another app (measured: Accessibility alone does NOT do this)"
             case .accessibility: return "so dictation can type at your cursor"
             case .automation: return "so Go to Agent can open an agent's terminal window"
             }
@@ -141,7 +147,13 @@ struct Permissions {
         /// that is not asked for is not shown and not counted (25 Sep: the
         /// Director app's first run offered Accessibility and Input Monitoring
         /// for keys it never listens to).
-        static var shown: [Kind] { allCases.filter { $0.isRequired } }
+        static var shown: [Kind] { allCases.filter { $0.isRequired || $0.isOptional } }
+
+        /// A row shown but not required (25 Sep): Input Monitoring in the
+        /// Director app, which runs fully without it (cards, taps, the Control
+        /// key while the app is focused, "Director, …" by voice) and needs it
+        /// only for the global Option hold. It can be skipped.
+        var isOptional: Bool { self == .inputMonitoring && !isRequired && AppIdentity.optionalHotkeys }
 
         /// All of them, except the two only the hotkey tap needs, in a build
         /// that has no hotkey tap (Tranquility Base Director, 25 Sep): it can
@@ -465,8 +477,11 @@ struct Permissions {
             @unknown default: return .denied
             }
         case .inputMonitoring:
-            // The one row where "recorded" and "usable" can disagree.
-            guard CGPreflightListenEventAccess() else { return .notAsked }
+            // The one row where "recorded" and "usable" can disagree. IOHID's
+            // own check first (25 Sep): it is the store System Settings lists.
+            guard CGPreflightListenEventAccess()
+                    || IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+            else { return .notAsked }
             return (listeningProbe?() ?? true) ? .active : .pendingRestart
         case .accessibility:
             if AXIsProcessTrusted() { return .active }
@@ -685,7 +700,7 @@ struct Permissions {
 
     /// Rows where the restart happened and changed nothing. These are the ones
     /// that must NOT be offered another restart.
-    static var stale: [Kind] { Kind.shown.filter { state($0) == .stale } }
+    static var stale: [Kind] { Kind.shown.filter { !$0.isOptional && state($0) == .stale } }
 
     /// Whether a state is allowed to let the app through.
     ///
@@ -716,14 +731,25 @@ struct Permissions {
     ///
     /// `unknowable` is absent from this list ON PURPOSE. See `opensTheGate`.
     static var failingTheGate: [Kind] {
-        Kind.shown.filter { !opensTheGate(state($0)) }
+        Kind.shown.filter { !$0.isOptional && !opensTheGate(state($0)) }
     }
 
     /// Anything granted that this process still cannot use. One restart clears
     /// all of them at once, which is why the checklist asks once at the end
     /// rather than after each grant.
     static var pendingRestart: [Kind] {
-        Kind.shown.filter { state($0) == .pendingRestart }
+        Kind.shown.filter { !$0.isOptional && state($0) == .pendingRestart }
+    }
+
+    /// An optional row the user chose to skip (25 Sep). Remembered, so it is
+    /// never asked for again; granting it later still works.
+    static func isSkipped(_ kind: Kind) -> Bool {
+        kind.isOptional && ProductDefaults.shared.bool(forKey: "permissions.skipped.\(kind)")
+    }
+    static func skip(_ kind: Kind) {
+        guard kind.isOptional else { return }
+        ProductDefaults.shared.set(true, forKey: "permissions.skipped.\(kind)")
+        log("\(kind.title) skipped: the app runs without it")
     }
 
     /// Progress across the whole list, required or not — "2 of 4 done".
@@ -737,7 +763,7 @@ struct Permissions {
         // beside it. "4 OF 5 DONE" over an enabled Start is the checklist
         // contradicting itself, and the row's own detail text is where the
         // nuance belongs — it says the reading could not be taken.
-        (Kind.shown.filter { opensTheGate(state($0)) }.count, Kind.shown.count)
+        (Kind.shown.filter { opensTheGate(state($0)) || isSkipped($0) }.count, Kind.shown.count)
     }
 
     static func isGranted(_ kind: Kind) -> Bool {
@@ -859,10 +885,16 @@ struct Permissions {
             }
             return isGranted(kind)
         case .inputMonitoring:
+            // IOHID FIRST (25 Sep). The Director app's Grant never put it in
+            // System Settings > Input Monitoring: CGRequestListenEventAccess
+            // alone does not register a bundle that has never created a tap,
+            // and that app has no tap until the grant exists. IOHIDRequestAccess
+            // adds the app to the list and shows macOS's own prompt.
+            let hid = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
             // Prompts the first time and lists the app thereafter. Safe to
             // call repeatedly: it returns the current state once already
             // decided.
-            let granted = CGRequestListenEventAccess()
+            let granted = CGRequestListenEventAccess() || hid
             // See `startListening`'s own doc comment: that call alone was
             // not enough to register the app on this machine. The real
             // tap-creation attempt is safe to run here too, since it is
@@ -906,7 +938,7 @@ struct Permissions {
         NSWorkspace.shared.open(url)
     }
 
-    static var missing: [Kind] { Kind.shown.filter { !isGranted($0) } }
+    static var missing: [Kind] { Kind.shown.filter { !$0.isOptional && !isGranted($0) } }
     /// The core loop's gate: required permissions only. Accessibility never blocks.
     static var allGranted: Bool {
         Kind.allCases.filter(\.isRequired).allSatisfy { isGranted($0) }
