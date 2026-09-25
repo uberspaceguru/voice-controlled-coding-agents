@@ -57,9 +57,14 @@ if [ -d "$DEST" ]; then
     fail "the signing requirement changed; its permissions would reset. Set TB_ALLOW_DIRECTOR_IDENTITY_CHANGE=1 only on purpose."
   fi
   if pgrep -f "$DEST/Contents/MacOS/TranquilityApp" >/dev/null; then
+    # Its children first, by pid: the hands-free manager outlives a quit app
+    # (25 Sep: one kept the microphone and the launcher's lock, so the new
+    # app's hands-free could not start). Only this app's own children.
+    KIDS=$(for p in $(pgrep -f "$DEST/Contents/MacOS/TranquilityApp"); do pgrep -P "$p"; done | tr '\n' ' ')
     osascript -e "with timeout of 5 seconds" -e "tell application id \"$BUNDLE_ID\" to quit" -e "end timeout" >/dev/null 2>&1 || true
     for _ in $(seq 1 20); do pgrep -f "$DEST/Contents/MacOS/TranquilityApp" >/dev/null || break; sleep 0.5; done
     pkill -f "$DEST/Contents/MacOS/TranquilityApp" 2>/dev/null || true
+    for k in $KIDS; do kill -TERM "$k" 2>/dev/null || true; done
   fi
 fi
 
