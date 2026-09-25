@@ -438,6 +438,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before anything can take the keyboard. An accessory app with no main
         // menu has no Command-V, in any field, ever: see `EditMenu`.
         EditMenu.install()
+        // Prod, by bundle id, for the Director app's optional Option hold. First,
+        // so the checklist and its preview read it too.
+        AppIdentity.runningApps = { id in
+            NSRunningApplication.runningApplications(withBundleIdentifier: id).map(\.processIdentifier)
+        }
 
         // One instance owns the hotkey and the microphone. Two builds running
         // at once BOTH receive the global hotkey and both open the mic —
@@ -2155,10 +2160,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Prod, by bundle id, for the Director app's optional Option hold.
-        AppIdentity.runningApps = { id in
-            NSRunningApplication.runningApplications(withBundleIdentifier: id).map(\.processIdentifier)
-        }
         // The Director app's keys without Input Monitoring (25 Sep): while one
         // of its windows has the keyboard, the app's own events feed the same
         // gesture machine the tap does. `feed` ignores them whenever the tap runs.
