@@ -430,6 +430,18 @@ else
   codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" \
     --entitlements TranquilityBase.entitlements \
     --options runtime --timestamp=none "$APP_DIR"
+  # A Development build signed by a local identity has no Team ID, and the
+  # hardened runtime will not load the embedded Sparkle into it: dyld stops
+  # before main with "Library not loaded" (24 Sep, the preview window). Only
+  # that build, and only then, is re-signed with the one extra key; any build
+  # with a Team ID keeps library validation. See TranquilityBaseDev.entitlements.
+  TEAM=$(codesign -dv "$APP_DIR" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+  if [ "$APP_CHANNEL" = development ] && [ "${TEAM:-not set}" = "not set" ]; then
+    codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" \
+      --entitlements TranquilityBaseDev.entitlements \
+      --options runtime --timestamp=none "$APP_DIR"
+    echo "local Dev identity has no Team ID: embedded frameworks allowed (TranquilityBaseDev.entitlements)"
+  fi
   echo "signed as: $IDENTITY"
 fi
 

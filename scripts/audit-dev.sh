@@ -35,9 +35,15 @@ case "$DEV_SIGNING" in
   *) fail "ad-hoc signature would reset TCC on rebuild" ;;
 esac
 DEV_ENTITLEMENTS=$(codesign -d --entitlements :- "$DEV" 2>/dev/null || true)
+DEV_TEAM=$(printf '%s\n' "$DEV_SIGNING" | sed -n 's/^TeamIdentifier=//p')
 case "$DEV_ENTITLEMENTS" in
   *com.apple.security.cs.disable-library-validation*)
-    fail "temporary icon-helper entitlement leaked into the final app" ;;
+    # Allowed on exactly one build: Development, signed by a local identity
+    # with no Team ID, which otherwise cannot load its own embedded Sparkle
+    # (bundle.sh, TranquilityBaseDev.entitlements). Anything with a team is
+    # the icon-helper's temporary key leaking into the final app.
+    [ "${DEV_TEAM:-not set}" = "not set" ] \
+      || fail "temporary icon-helper entitlement leaked into the final app" ;;
 esac
 
 if [ -n "$PROD" ]; then

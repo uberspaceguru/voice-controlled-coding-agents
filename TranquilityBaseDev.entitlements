@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- TranquilityBase.entitlements, plus one key, for ONE case only: a
+	     Development build signed by a local identity with no Apple Team ID
+	     (scripts/make-signing-identity.sh). The hardened runtime loads an
+	     embedded framework only from the SAME Team ID, and "not set" matches
+	     nothing, so such a build dies in dyld before main: "Library not
+	     loaded: @rpath/Sparkle.framework" (24 Sep, and 19 Sep before it).
+	     bundle.sh applies this file only when the signature it just made has
+	     no Team ID; audit-dev.sh refuses it on any build that has one. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>
