@@ -3240,6 +3240,36 @@ final class StatusHUD: NSObject {
                     .size(withAttributes: [.font: GridRowView.auxFont]).width)
             }.max() ?? 0)
         for (index, item) in shown.enumerated() {
+            // A line inside an open right-hand is drawn nested, never as an
+            // agent row (25 Sep). The group closes with a full divider before
+            // the next hand; inside it there are no rules at all.
+            if let parent = item.parentId, let (_, part) = RightHands.Accordion.part(of: item.id) {
+                let isLastOfGroup = index == shown.count - 1 || shown[index + 1].parentId != parent
+                switch part {
+                case .more:
+                    let more = MoreButton(item: item, target: self, action: #selector(sessionRowTapped(_:)))
+                    let holder = NSView()
+                    holder.translatesAutoresizingMaskIntoConstraints = false
+                    holder.addSubview(more)
+                    NSLayoutConstraint.activate([
+                        more.leadingAnchor.constraint(equalTo: holder.leadingAnchor,
+                                                      constant: NestedRowView.indent + 12),
+                        more.topAnchor.constraint(equalTo: holder.topAnchor, constant: 2),
+                        more.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -6),
+                    ])
+                    waitingRows.addArrangedSubview(holder)
+                    holder.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+                case .summary, .item:
+                    let nested = NestedRowView(item: item, kind: part == .summary ? .summary : .item,
+                                               target: self, action: #selector(sessionRowTapped(_:)))
+                    waitingRows.addArrangedSubview(nested)
+                    nested.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+                }
+                if isLastOfGroup, index < shown.count - 1 {
+                    waitingRows.addArrangedSubview(hairline(StateLegend.Palette.hairline))
+                }
+                continue
+            }
             let row = GridRowView(item: item, auxWidth: auxWidth, target: self,
                                   action: #selector(sessionRowTapped(_:)))
             // The lamp column is the session's power switch, on every row.
@@ -3274,7 +3304,8 @@ final class StatusHUD: NSObject {
             row.menu = rowMenu(for: item)
             waitingRows.addArrangedSubview(row)
             row.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
-            if index < shown.count - 1 {
+            // No rule between a hand and its own open lines: they are one group.
+            if index < shown.count - 1, shown[index + 1].parentId != item.id {
                 waitingRows.addArrangedSubview(hairline(StateLegend.Palette.hairlineSoft))
             }
         }

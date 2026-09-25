@@ -110,6 +110,10 @@ public extension GridAssembler {
         public var cards: [String: RightHands.Rollup]
         /// The hand that is open, if any.
         public var expanded: String?
+        /// "more…" was pressed on the open hand.
+        public var expandedAll: Bool
+        /// The sentence the open hand said when it opened.
+        public var expandedSaid: String?
 
         /// What the poller last saw, in the shape the bands need.
         public struct RemoteAgents {
@@ -163,7 +167,9 @@ public extension GridAssembler {
             handOrder: [String] = [],
             handNames: [String: String] = [:],
             cards: [String: RightHands.Rollup] = [:],
-            expanded: String? = nil
+            expanded: String? = nil,
+            expandedAll: Bool = false,
+            expandedSaid: String? = nil
         ) {
             self.waiting = waiting
             self.known = known
@@ -187,6 +193,8 @@ public extension GridAssembler {
             self.handNames = handNames
             self.cards = cards
             self.expanded = expanded
+            self.expandedAll = expandedAll
+            self.expandedSaid = expandedSaid
         }
     }
 
@@ -729,7 +737,8 @@ public extension GridAssembler {
                 guard let row = Self.handRow(id: id, existing: byId[id], input: input) else { continue }
                 pinned.append(row)
                 if input.expanded == id, let card = input.cards[id] {
-                    pinned += RightHands.Accordion.rows(parent: id, card: card)
+                    pinned += RightHands.Accordion.rows(parent: id, card: card, said: input.expandedSaid,
+                                                        all: input.expandedAll)
                 }
             }
             let taken = Set(input.handOrder)

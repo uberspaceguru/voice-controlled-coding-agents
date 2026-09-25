@@ -103,8 +103,8 @@ final class RightHandsPanelTests: XCTestCase {
             "Wispr: Decision on the insertion fix", "Memory: Which store to keep", "To-do list",
             "more…", "Yobi1", "Sys-3PO", "TeamChat Manager"])
         XCTAssertEqual(grid[1].parentId, director)
-        XCTAssertEqual(grid[2].lamp, .ready, "an item that needs him wears the dot")
-        XCTAssertEqual(grid[2].read, .unread, "and the dot is solid")
+        XCTAssertEqual(grid[2].lamp, .running, "a line is not an agent: no status dot (25 Sep)")
+        XCTAssertEqual(grid[2].read, .none)
         XCTAssertEqual(grid[5].lamp, .running)
         for line in grid[1...5] {
             XCTAssertEqual(SessionRow.action(for: line), .announce, "every line is a door, never a terminal")
@@ -156,5 +156,45 @@ final class RightHandsPanelTests: XCTestCase {
         XCTAssertEqual(GhosttyDoor.socket(for: "x", hasSession: { sock, _ in sock == "default" }), "default")
         XCTAssertNil(GhosttyDoor.socket(for: "x", hasSession: { _, _ in false }))
         XCTAssertEqual(GhosttyDoor.candidateSockets.first, Tmux.socketName, "this app's own socket first")
+    }
+
+    // MARK: - Director's own panel lines (25 Sep)
+
+    private let status = """
+    {"groups": {"needs_you": [{"name": "w-a19", "session_id": "s1"}], "working": [], "idle": []},
+     "needs": {"summary": "Seven things need you: approval for TypeSafe, a model for TeamChat iOS, one more.",
+               "lines": [{"line": "Code hygiene: approval needed to send private repository…", "full": "x"},
+                         {"line": "TeamChat: switch model for TeamChat iOS?"},
+                         {"line": "React web app: switch model for React parity?"},
+                         {"line": "YobiWork: a decision, waiting 6 days"},
+                         {"line": "Yobi1: something to do, waiting since yesterday"},
+                         {"line": "Wispr: something to do, waiting 7 days"}]}}
+    """
+
+    func testDirectorsPanelLinesAreTheItemsAndItsSentenceTheSummary() throws {
+        let card = try XCTUnwrap(RightHands.Rollup.parse(Data(status.utf8)))
+        XCTAssertEqual(card.panelSummary, "Seven things need you: approval for TypeSafe, a model for TeamChat iOS, one more.")
+        XCTAssertEqual(card.panelLines.count, 6)
+        let rows = RightHands.Accordion.rows(parent: director, card: card,
+                                             said: "Ahmed, seven things need you; first, Code hygiene.")
+        XCTAssertEqual(rows.map(\.name), [
+            "Ahmed, seven things need you; first, Code hygiene.",
+            "Code hygiene: approval needed to send private repository\u{2026}",
+            "TeamChat: switch model for TeamChat iOS?",
+            "React web app: switch model for React parity?",
+            "more\u{2026}"])
+        XCTAssertEqual(RightHands.Accordion.rows(parent: director, card: card).first?.name,
+                       card.panelSummary, "without a said sentence, Director's panel summary")
+    }
+
+    func testMoreRevealsWhatDirectorNumbersAndThenIsGone() throws {
+        let card = try XCTUnwrap(RightHands.Rollup.parse(Data(status.utf8)))
+        let all = RightHands.Accordion.rows(parent: director, card: card, all: true)
+        XCTAssertEqual(all.count, 1 + RightHands.Accordion.most, "the summary and five lines")
+        XCTAssertFalse(all.contains { $0.name == "more\u{2026}" }, "nothing more to show")
+    }
+
+    func testAnItemIsAskedAboutByNumber() {
+        XCTAssertEqual(RightHands.Accordion.explainRequest(number: 2), "tell me more about number 2")
     }
 }

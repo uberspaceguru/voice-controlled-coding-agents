@@ -34,24 +34,35 @@ extension AppDelegate {
     private func toggleHand(_ id: String, hand: RightHands.Hand) {
         if expandedHand == id {
             expandedHand = nil
+            expandedAll = false
             Permissions.log("right-hands: \(hand.name ?? id.prefix(8).description) closed")
             showIdleGrid()
             return
         }
         expandedHand = id
+        expandedAll = false
         Permissions.log("right-hands: \(hand.name ?? id.prefix(8).description) opened")
         Task.detached(priority: .userInitiated) { [weak self] in
             let card = RightHands.card(for: hand)
             if let card { RightHands.CardCache.shared.put(card, for: id) }
+            // Director's own sentence (25 Sep): asked in the card's thread, which
+            // also renumbers the list "number 2" binds to, and shown and spoken
+            // exactly as it came back. Never a summary of it.
+            var said: String?
+            if hand.asks, case .success(let line) = RightHands.ask(
+                hand, text: "what needs me?", conversation: id, session: id) {
+                said = line
+            }
+            let line = said ?? card?.panelSummary
+            RightHands.CardCache.shared.putSaid(line, for: id)
             await MainActor.run { [weak self] in
                 guard let self, self.expandedHand == id else { return }
                 self.showIdleGrid()
-                guard let card else {
+                guard let line else {
                     self.hud.showResult("\(hand.name ?? "Director") didn't answer just now.")
                     return
                 }
-                self.speakOverGrid(RightHands.Accordion.sentence(card), as: id,
-                                   name: hand.name ?? "Director")
+                self.speakOverGrid(line, as: id, name: hand.name ?? "Director")
             }
         }
     }
@@ -64,10 +75,19 @@ extension AppDelegate {
         let name = RightHands.hand(for: parent)?.name ?? "Director"
         switch part {
         case .item(let n):
-            guard let card = RightHands.CardCache.shared.card(for: parent),
-                  n >= 1, n <= card.projects.count else { return }
+            guard let card = RightHands.CardCache.shared.card(for: parent) else { return }
+            let lines = RightHands.Accordion.lines(card)
+            guard n >= 1, n <= lines.count else { return }
+            Permissions.log("right-hands: \(name) item \(n) (\(lines[n - 1])) opened")
+            // Director's own lines are asked about by number: they are the
+            // list Director numbered for this thread when the hand opened.
+            if !card.panelLines.isEmpty, RightHands.hand(for: parent)?.asks == true {
+                askBrain(RightHands.Accordion.explainRequest(number: n), of: parent, name: name,
+                         fallback: lines[n - 1])
+                return
+            }
+            guard n <= card.projects.count else { return }
             let project = card.projects[n - 1]
-            Permissions.log("right-hands: \(name) item \(n) (\(project.name)) opened")
             // Tap-to-explain (25 Sep): the hand explains the item in plain
             // words, and the item is then in focus in its thread, so a "yes"
             // said next answers it. If the hand cannot answer, the card reads
@@ -78,7 +98,13 @@ extension AppDelegate {
             } else {
                 speakOnCard(RightHands.Accordion.itemSentence(project), as: parent, name: name)
             }
-        case .more, .summary:
+        case .more:
+            // More shows more (25 Sep: a button that reveals the rest of the
+            // list, up to what Director numbers), and says nothing.
+            expandedAll = true
+            Permissions.log("right-hands: \(name) more")
+            showIdleGrid()
+        case .summary:
             askBrain("what needs me?", of: parent, name: name)
         }
     }

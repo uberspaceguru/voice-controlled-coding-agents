@@ -492,14 +492,23 @@ public enum RightHands {
         /// dot when nothing else feeds this app its turns (25 Sep, the
         /// Director app has no hooks of its own).
         public var needsSessions: Set<String>
+        /// Director's own words for the panel (25 Sep, `needs` in its status
+        /// JSON): one sentence naming the top three, and "<project>: <what>"
+        /// lines already cut at a word, in the order of the numbered list
+        /// `director ask` binds "number 2" to. Empty when the source has none.
+        public var panelSummary: String?
+        public var panelLines: [String]
 
         public init(projects: [Project], updatedAt: String? = nil, totals: String? = nil,
-                    needsYou: Int? = nil, needsSessions: Set<String> = []) {
+                    needsYou: Int? = nil, needsSessions: Set<String> = [],
+                    panelSummary: String? = nil, panelLines: [String] = []) {
             self.projects = projects
             self.updatedAt = updatedAt
             self.totals = totals
             self.needsYou = needsYou ?? projects.filter { $0.state == .needsYou }.count
             self.needsSessions = needsSessions
+            self.panelSummary = panelSummary
+            self.panelLines = panelLines
         }
 
         public static func load(path: String) -> Rollup? {
@@ -513,7 +522,17 @@ public enum RightHands {
         public static func parse(_ data: Data) -> Rollup? {
             guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
             if object["projects"] == nil, let groups = object["groups"] as? [String: Any] {
-                return fromDirectorStatus(groups)
+                var card = fromDirectorStatus(groups)
+                if let needs = object["needs"] as? [String: Any] {
+                    card.panelSummary = (needs["summary"] as? String)
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .flatMap { $0.isEmpty ? nil : $0 }
+                    card.panelLines = (needs["lines"] as? [[String: Any]] ?? [])
+                        .compactMap { ($0["line"] as? String) ?? ($0["full"] as? String) }
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                }
+                return card
             }
             guard let raw = object["projects"] as? [[String: Any]] else { return nil }
             let projects = raw.compactMap { entry -> Project? in
@@ -705,6 +724,25 @@ public enum RightHands {
             "tell me more about \(project.name)"
         }
 
+        /// The same ask by NUMBER, for Director's own panel lines (25 Sep):
+        /// they are in the order of the numbered list Director keeps for the
+        /// thread (refreshed by the "what needs me?" asked when the hand
+        /// opens), and they carry no agent names to bind by.
+        public static func explainRequest(number n: Int) -> String {
+            "tell me more about number \(n)"
+        }
+
+        /// The most lines an open hand shows once "more…" is pressed: Director
+        /// numbers five for a thread, and a sixth could not be asked about.
+        public static let most = 5
+
+        /// The line an item row shows and speaks: Director's own panel line
+        /// when it sent them, else the project and its line.
+        public static func lines(_ card: Rollup) -> [String] {
+            if !card.panelLines.isEmpty { return card.panelLines }
+            return card.projects.map { $0.line.isEmpty ? $0.name : "\($0.name): \($0.line)" }
+        }
+
         /// What a tap on one item speaks: whose it is, and what it needs.
         public static func itemSentence(_ project: Rollup.Project) -> String {
             let state: String
@@ -720,22 +758,31 @@ public enum RightHands {
         /// The lines, as rows under `parent`. A needs-you item wears the dot;
         /// every other line is hollow. Each opens its card, which is why each
         /// carries a recorded turn.
-        public static func rows(parent: String, card: Rollup) -> [SessionRow] {
-            var out = [SessionRow(id: id(parent, .summary), name: summary(card), aux: "",
+        /// `said` is the sentence Director returned when the hand was opened,
+        /// shown as it came back (25 Sep: "the summary row is the sentence
+        /// Director returns"); without it, Director's panel summary, then a
+        /// count. `all` is "more…" pressed: up to `most` lines, and no button.
+        public static func rows(parent: String, card: Rollup, said: String? = nil,
+                                all: Bool = false) -> [SessionRow] {
+            let summaryText = said ?? card.panelSummary ?? summary(card)
+            var out = [SessionRow(id: id(parent, .summary), name: summaryText, aux: "",
                                   lamp: .running, read: .opened, hasRecordedTurn: true)
                 .placed(pinned: false, parentId: parent)]
-            for (index, project) in card.projects.prefix(shown).enumerated() {
-                let label = project.line.isEmpty ? project.name : "\(project.name): \(project.line)"
-                out.append(SessionRow(id: id(parent, .item(index + 1)), name: label, aux: "",
-                                      lamp: project.state == .needsYou ? .ready : .running,
-                                      read: project.state == .needsYou ? .unread : .none,
-                                      detail: itemSentence(project),
+            let lines = lines(card)
+            let count = min(lines.count, all ? most : shown)
+            for (index, line) in lines.prefix(count).enumerated() {
+                let project = index < card.projects.count ? card.projects[index] : nil
+                out.append(SessionRow(id: id(parent, .item(index + 1)), name: line, aux: "",
+                                      lamp: .running, read: .none,
+                                      detail: project.map(itemSentence) ?? line,
                                       hasRecordedTurn: true)
                     .placed(pinned: false, parentId: parent))
             }
-            out.append(SessionRow(id: id(parent, .more), name: "more…", aux: "", lamp: .running,
-                                  read: .opened, hasRecordedTurn: true)
-                .placed(pinned: false, parentId: parent))
+            if count < min(lines.count, most) {
+                out.append(SessionRow(id: id(parent, .more), name: "more…", aux: "", lamp: .running,
+                                      read: .opened, hasRecordedTurn: true)
+                    .placed(pinned: false, parentId: parent))
+            }
             return out
         }
     }
@@ -776,6 +823,15 @@ public enum RightHands {
 
         public func release(_ id: String) {
             lock.lock(); inFlight.remove(id); lock.unlock()
+        }
+
+        /// The sentence the hand said when it was last opened, by hand id.
+        private var said: [String: String] = [:]
+        public func putSaid(_ line: String?, for id: String) {
+            lock.lock(); said[id] = line; lock.unlock()
+        }
+        public func saidLine(for id: String) -> String? {
+            lock.lock(); defer { lock.unlock() }; return said[id]
         }
 
         /// Run each due hand's command and keep what it printed. Blocking;

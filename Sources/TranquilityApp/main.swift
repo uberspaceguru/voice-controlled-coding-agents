@@ -254,6 +254,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lastRightHandCount = -2
     /// The right-hand whose lines are open on the grid (the accordion), if any.
     var expandedHand: String?
+    /// "more…" was pressed on the open hand: show every line Director numbers.
+    var expandedAll = false
     /// Which harness each session runs, rebuilt every repaint from the live
     /// map and the rows. One map, so the card and the grid cannot disagree.
     var harnessById: [String: String] = [:]

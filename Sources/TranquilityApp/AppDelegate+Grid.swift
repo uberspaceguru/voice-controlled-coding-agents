@@ -221,7 +221,9 @@ extension AppDelegate {
             cards: (hands?.hands ?? [:]).keys.reduce(into: [String: RightHands.Rollup]()) { out, id in
                 if let card = RightHands.CardCache.shared.card(for: id) { out[id] = card }
             },
-            expanded: expandedHand))
+            expanded: expandedHand,
+            expandedAll: expandedAll,
+            expandedSaid: expandedHand.flatMap { RightHands.CardCache.shared.saidLine(for: $0) }))
         if let hands { refreshHandCards(hands.hands) }
 
         // Recorded before anything is drawn so the card can ask the same
