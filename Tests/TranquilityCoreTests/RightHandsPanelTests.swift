@@ -78,6 +78,9 @@ final class RightHandsPanelTests: XCTestCase {
         XCTAssertEqual(lamp["Yobi1"], .ready, "a turn waiting is something for him")
         XCTAssertEqual(lamp["Sys-3PO"], .running, "idle is a hollow dot")
         XCTAssertEqual(lamp["TeamChat Manager"], .unlit, "a placeholder is greyed")
+        for row in rows where row.pinned && row.lamp == .ready {
+            XCTAssertEqual(row.read, .unread, "\(row.name): a dot is solid; an opened green draws as a ring")
+        }
         let quiet = verdict(cards: [director: RightHands.Rollup(projects: [], needsYou: 0)])
         XCTAssertEqual(quiet.first { $0.name == "Director" }?.lamp, .running)
         let cold = verdict(cards: [:])
@@ -101,6 +104,7 @@ final class RightHandsPanelTests: XCTestCase {
             "more…", "Yobi1", "Sys-3PO", "TeamChat Manager"])
         XCTAssertEqual(grid[1].parentId, director)
         XCTAssertEqual(grid[2].lamp, .ready, "an item that needs him wears the dot")
+        XCTAssertEqual(grid[2].read, .unread, "and the dot is solid")
         XCTAssertEqual(grid[5].lamp, .running)
         for line in grid[1...5] {
             XCTAssertEqual(SessionRow.action(for: line), .announce, "every line is a door, never a terminal")

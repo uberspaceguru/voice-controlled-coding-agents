@@ -713,7 +713,8 @@ public enum RightHands {
                 let label = project.line.isEmpty ? project.name : "\(project.name): \(project.line)"
                 out.append(SessionRow(id: id(parent, .item(index + 1)), name: label, aux: "",
                                       lamp: project.state == .needsYou ? .ready : .running,
-                                      read: .opened, detail: itemSentence(project),
+                                      read: project.state == .needsYou ? .unread : .none,
+                                      detail: itemSentence(project),
                                       hasRecordedTurn: true)
                     .placed(pinned: false, parentId: parent))
             }

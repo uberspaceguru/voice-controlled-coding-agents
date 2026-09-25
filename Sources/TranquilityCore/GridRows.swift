@@ -316,8 +316,11 @@ public extension GridAssembler {
         let name = input.handNames[id] ?? input.brains[id] ?? existing?.name ?? id
         if let brain = input.brains[id] {
             let dot = (input.cards[id]?.needsYou ?? 0) > 0
+            // The dot is SOLID: a green lamp the grid has seen opened draws as a
+            // ring (GridRowView, "a solid dot that hollows out once you have
+            // looked"), and a right-hand's dot means "needs me" until it does not.
             return SessionRow(id: id, name: brain, aux: "", lamp: dot ? .ready : .running,
-                              revivable: false, read: .opened,
+                              revivable: false, read: dot ? .unread : .none,
                               detail: input.cards[id].map { RightHands.Accordion.summary($0) },
                               hasRecordedTurn: true)
                 .placed(pinned: true)
@@ -330,7 +333,8 @@ public extension GridAssembler {
         if row.switchedOff { return row }
         let lamp: Lamp = row.lamp.asksForYou ? .ready : (row.lamp == .unlit ? .unlit : .running)
         return SessionRow(id: row.id, name: name, aux: "", lamp: lamp, revivable: row.revivable,
-                          read: row.read, detail: row.detail ?? row.aux, harness: row.harness,
+                          read: lamp == .ready ? .unread : row.read,
+                          detail: row.detail ?? row.aux, harness: row.harness,
                           door: row.door, hasRecordedTurn: row.hasRecordedTurn,
                           lastActivity: row.lastActivity)
             .placed(pinned: true)
