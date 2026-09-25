@@ -23,10 +23,15 @@ final class NestedRowView: NSControl {
 
     private let label: NSTextField
     private let resting: NSColor
+    private let kind: Kind
+    /// The whole line, kept so a resize can cut it again from the start.
+    private let fullText: String
 
     init(item: SessionRow, kind: Kind, target: AnyObject, action: Selector) {
         label = NSTextField(wrappingLabelWithString: item.name)
         resting = kind == .summary ? StateLegend.Palette.secondary : StateLegend.Palette.ink
+        self.kind = kind
+        fullText = item.name
         super.init(frame: .zero)
         self.target = target
         self.action = action
@@ -76,13 +81,38 @@ final class NestedRowView: NSControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    /// The width the label wraps at, once the row knows its own width.
+    /// The width the label wraps at, once the row knows its own width; and an
+    /// item, which is one line, is cut at its last whole word that fits.
+    /// AppKit's own word-boundary cut applies only across lines: measured on
+    /// the first render, a one-line item cut "send pri…" mid-word.
     override func layout() {
         super.layout()
         let width = label.frame.width
         if width > 0, label.preferredMaxLayoutWidth != width {
             label.preferredMaxLayoutWidth = width
         }
+        if kind == .item, width > 0 {
+            let cut = Self.cutAtWord(fullText, font: Self.font, width: width)
+            if label.stringValue != cut { label.stringValue = cut }
+        }
+    }
+
+    /// The longest prefix ending at a word, plus "…", that fits `width`; the
+    /// whole text when it fits. A single word too long for the row is the
+    /// only case cut inside a word, because there is no earlier boundary.
+    static func cutAtWord(_ text: String, font: NSFont, width: CGFloat) -> String {
+        func fits(_ s: String) -> Bool {
+            (s as NSString).size(withAttributes: [.font: font]).width <= width
+        }
+        if fits(text) { return text }
+        var words = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        while words.count > 1 {
+            words.removeLast()
+            var head = words.joined(separator: " ")
+            while let last = head.last, ",;:-–—".contains(last) { head.removeLast() }
+            if fits(head + "…") { return head + "…" }
+        }
+        return text
     }
 
     override func updateTrackingAreas() {

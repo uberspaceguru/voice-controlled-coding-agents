@@ -136,6 +136,33 @@ extension StatusHUD {
                       aux: "d882f184", lamp: .running),
             ])
 
+        // The right-hands panel with Director open (25 Sep): four hands, and
+        // the accordion drawn by the same Core builder the app uses, so this
+        // picture is the rendering Ahmed gets, with Director's words in it.
+        case "right-hands-open":
+            let director = "ac03daf5-bd0a-42a7-91b2-fe789e3f8a1a"
+            let card = RightHands.Rollup(
+                projects: [], needsYou: 7,
+                panelSummary: "Seven things need you: approval needed to send private repository "
+                    + "metadata to TypeSafe, switch model for TeamChat iOS, one more.",
+                panelLines: ["Code hygiene: approval needed to send private repository\u{2026}",
+                             "TeamChat: switch model for TeamChat iOS?",
+                             "React web app: switch model for React parity?",
+                             "YobiWork: a decision, waiting 6 days",
+                             "Yobi1: something to do, waiting since yesterday"])
+            showIdle(rows: [SessionRow(id: director, name: "Director", aux: "", lamp: .ready,
+                                       read: .unread, hasRecordedTurn: true).placed(pinned: true)]
+                + RightHands.Accordion.rows(
+                    parent: director, card: card,
+                    said: "Ahmed, seven things need you; first, approval needed to send private "
+                        + "repository metadata to TypeSafe for the code hygiene work.")
+                + [SessionRow(id: "y1", name: "Yobi1", aux: "", lamp: .ready, read: .unread,
+                              hasRecordedTurn: true).placed(pinned: true),
+                   SessionRow(id: "s3", name: "Sys-3PO", aux: "", lamp: .running,
+                              hasRecordedTurn: true).placed(pinned: true),
+                   SessionRow(id: "hand:teamchat-manager", name: "TeamChat Manager", aux: "",
+                              lamp: .unlit).placed(pinned: true)])
+
         // The grid with a row lit, because a hover is a face too and it was
         // the one state nobody could photograph. Every other treatment on this
         // panel has been decided by looking at a picture of it; this one was
