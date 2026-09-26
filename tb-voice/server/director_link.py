@@ -206,30 +206,37 @@ def is_echo(text: str, last_answer: str | None, age: float) -> bool:
 # (Boukaram 2021; Liu, Guo & Mousas 2026), and repeating "please wait" made a
 # wait feel longer (Lopez Gambino 2018). Nothing under ~1.2 s; then his request
 # said back in a few words; then where Director is looking; never twice.
-SHORT_BRIDGE_AFTER = 1.2     # s from the ask: say back what he asked
-LONG_BRIDGE_AFTER = 3.5      # s: say where it is looking
+# Policy v2 (SPEC-voice-v2 R4, 25 Sep night review): Ahmed heard the old lines as
+# "one minute", and one fired on nearly every turn. At most ONE filler per turn,
+# only after 1.5 s; none for a hearing check, a count or a yes/no question (the
+# answer is short, a filler only delays it); five lines in rotation, never one of
+# the last three; no "sec", "minute", "moment" or "please wait" in any of them.
+FILLER_AFTER = 1.5
 _TOPIC = re.compile(r"(?i)\b(the\s+[\w-]+(?:\s+[\w-]+)?\s+one)\b")
-_ECHO = [
-    (re.compile(r"(?i)\b(what needs me|need(s)? (my|your) attention|anything for me|what's (up|going on)|status|overview)\b"),
-     "What needs you. One sec."),
-    (re.compile(r"(?i)\b(what's|what is|anything) ready\b"), "What's ready. One sec."),
-    (re.compile(r"(?i)\b(done yet|is (it|that) done|waiting on)\b"), "Checking on that. One sec."),
-]
+FILLERS = ("Checking.", "Let me look.", "Looking at the fleet.", "Having a look.", "{topic}, looking.")
+_NO_FILLER = re.compile(
+    r"(?i)(\bcan you hear me\b|\bare you (there|here|listening|alive)\b|\bhello\b|\bhow many\b|\bhow much\b"
+    r"|^\W*(is|did|are|does|do|can|could|will|would|was|were|has|have|had|should)\b)")
 
 
-def bridge(kind: str, words: str, last: str | None = None) -> str:
-    """What Director says while the answer is on its way: his own request, said
-    back ("The GPU one. One sec."), then where it is looking; never the same
-    line twice in a row, never a bare filler."""
+def wants_filler(words: str) -> bool:
+    """No filler for a hearing check, a count or a yes/no question."""
+    return not _NO_FILLER.search((words or "").strip())
+
+
+def filler(words: str, recent: list[str] | tuple = ()) -> str:
+    """The next filler in rotation, never one of the last three said."""
     m = _TOPIC.search(words or "")
-    if kind == "short":
-        options = ([f"{m.group(1)[:1].upper()}{m.group(1)[1:]}. One sec."] if m else [])
-        options += [line for pattern, line in _ECHO if pattern.search(words or "")]
-        options += ["Give me a second on that.", "Let me check that."]
-    else:
-        options = ([f"Looking at {m.group(1)} now."] if m else []) + ["Still checking; nearly there.",
-                                                                   "Looking into it now."]
-    return next(t for t in options if t != last)
+    lines = [line for line in FILLERS if "{topic}" not in line]
+    if m:
+        lines.append(f"{m.group(1)[:1].upper()}{m.group(1)[1:]}, looking.")
+    last = list(recent)[-3:]
+    start = (lines.index(last[-1]) + 1) if last and last[-1] in lines else 0
+    for i in range(len(lines)):
+        line = lines[(start + i) % len(lines)]
+        if line not in last:
+            return line
+    return lines[start % len(lines)]
 
 
 # Lookups (Director's promises, lookups.py): polled while hands-free runs; a

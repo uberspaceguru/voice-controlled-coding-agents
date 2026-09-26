@@ -700,31 +700,39 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                 return
 
     async def _bridge_while(self, ask, name: str, words: str, asked: float):
-        """While the answer is on its way, announce the delay instead of leaving
-        silence: a short token past SHORT_BRIDGE_AFTER, a line naming what it is
-        doing past LONG_BRIDGE_AFTER. Each at most once per turn; nothing when
-        the answer is quick."""
+        """At most one filler per turn (SPEC-voice-v2 R4): only when the answer is not
+        back after FILLER_AFTER, never for a hearing check, a count or a yes/no, and
+        logged to Director's talk_log so every one can be checked."""
         import director_link
-        for after, kind in ((director_link.SHORT_BRIDGE_AFTER, "short"),
-                            (director_link.LONG_BRIDGE_AFTER, "long")):
-            wait = after - (time.monotonic() - asked)
-            if wait > 0:
-                try:
-                    await asyncio.wait_for(asyncio.shield(ask), timeout=wait)
-                    return
-                except asyncio.TimeoutError:
-                    pass
-            if ask.done():
-                return
-            line = director_link.bridge(kind, words, getattr(self, "_last_bridge", None))
-            self._last_bridge = line
-            token = BRIDGING.set(True)
+        if not director_link.wants_filler(words):
+            return
+        wait = director_link.FILLER_AFTER - (time.monotonic() - asked)
+        if wait > 0:
             try:
-                await self._say(line, voice="director" if name == "Director" else "manager",
-                                response_mode="receipt")
-            finally:
-                BRIDGING.reset(token)
-            self._require_current()
+                await asyncio.wait_for(asyncio.shield(ask), timeout=wait)
+                return
+            except asyncio.TimeoutError:
+                pass
+        if ask.done():
+            return
+        recent = getattr(self, "_recent_fillers", [])
+        line = director_link.filler(words, recent)
+        self._recent_fillers = (recent + [line])[-3:]
+        waited_ms = int((time.monotonic() - asked) * 1000)
+        # The event log, not the pipeline: a filler is a record to check, not a frame for the app
+        from events import line as event_line
+        event_line("filler", text=line, heard=words[:120], ms=waited_ms)
+        logger.info(f"filler after {waited_ms} ms: {line!r} for {words[:80]!r}")
+        asyncio.ensure_future(_run(director_link.director_bin(), "voice-event", "--kind", "filler",
+                                   "--thread", director_link.session_thread(), "--heard", words[:300],
+                                   "--said", line, "--ms", str(waited_ms), timeout=15, quiet=True))
+        token = BRIDGING.set(True)
+        try:
+            await self._say(line, voice="director" if name == "Director" else "manager",
+                            response_mode="receipt")
+        finally:
+            BRIDGING.reset(token)
+        self._require_current()
 
     async def _relay_hand(self, name: str, words: str, text: str, *, named: bool = False):
         """'Director, …', 'Yobi1, …', 'Sys-3PO, …': the hand answers, never this

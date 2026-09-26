@@ -300,37 +300,66 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c for c in emit.await_args_list if c.args[1:] == ("answer",)], [])
         self.assertEqual(len(run.await_args_list), 2, "the follow-up needed no name")
 
-    async def test_a_slow_answer_is_announced_not_silent(self):
+    async def test_a_slow_answer_gets_one_filler_and_it_is_logged(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        calls = []
+
+        async def slow(*argv, timeout=60, quiet=False):
+            calls.append(argv)
+            if "voice-event" in argv:
+                return 0, ""
+            await asyncio.sleep(0.3)
+            return 0, "Eleven things need you."
+        with patch.dict(os.environ, env), patch("manager._run", slow), patch("manager.emit", AsyncMock()) as emit, \
+                patch.object(d, "FILLER_AFTER", 0.05):
+            await self.m._dialogue_turn("Director, tell me more about the GPU one", None, None)
+            await asyncio.sleep(0)
+        said = [c.args[0] for c in self.m._say.await_args_list]
+        self.assertEqual(said, ["Checking.", "Eleven things need you."], "one filler, then the answer")
+        logged = [a for a in calls if "voice-event" in a]
+        self.assertEqual(len(logged), 1)
+        self.assertIn("Checking.", logged[0])
+
+    async def test_no_filler_for_a_hearing_check_a_count_or_a_yes_no(self):
         import asyncio
         from unittest.mock import AsyncMock, patch
         env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
 
-        async def slow(*argv, timeout=60):
-            await asyncio.sleep(0.25)
-            return 0, "Eleven things need you."
-        with patch.dict(os.environ, env), patch("manager._run", slow), patch("manager.emit", AsyncMock()), \
-                patch.object(d, "SHORT_BRIDGE_AFTER", 0.05), patch.object(d, "LONG_BRIDGE_AFTER", 0.15):
-            await self.m._dialogue_turn("Director, tell me more about the GPU one", None, None)
-        said = [c.args[0] for c in self.m._say.await_args_list]
-        self.assertEqual(said[0], "The GPU one. One sec.")
-        self.assertEqual(said[1], "Looking at the GPU one now.")
-        self.assertEqual(said[-1], "Eleven things need you.")
+        async def slow(*argv, timeout=60, quiet=False):
+            await asyncio.sleep(0.2)
+            return 0, "Yes."
+        for words in ("Director, can you hear me?", "Director, how many agents are running?",
+                      "Director, is the build done?", "Director, are you there?"):
+            self.m._say.reset_mock()
+            with patch.dict(os.environ, env), patch("manager._run", slow), patch("manager.emit", AsyncMock()), \
+                    patch.object(d, "FILLER_AFTER", 0.05):
+                await self.m._dialogue_turn(words, None, None)
+            self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Yes."], words)
 
     async def test_a_quick_answer_has_no_token(self):
         from unittest.mock import AsyncMock, patch
         env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
-        with patch.dict(os.environ, env), patch("manager._run", AsyncMock(return_value=(0, "Yes, I hear you."))), \
+        with patch.dict(os.environ, env), patch("manager._run", AsyncMock(return_value=(0, "Two things need you."))), \
                 patch("manager.emit", AsyncMock()):
-            await self.m._dialogue_turn("Director, can you hear me?", None, None)
-        self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Yes, I hear you."])
+            await self.m._dialogue_turn("Director, what needs me?", None, None)
+        self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Two things need you."])
 
-    def test_tokens_say_his_request_back_and_never_repeat(self):
-        self.assertEqual(d.bridge("short", "what needs me?"), "What needs you. One sec.")
-        self.assertEqual(d.bridge("short", "what about the TeamChat desktop one?"), "The TeamChat desktop one. One sec.")
-        self.assertEqual(d.bridge("long", "what about the TeamChat desktop one?"), "Looking at the TeamChat desktop one now.")
-        self.assertNotEqual(d.bridge("short", "hm", "Give me a second on that."), "Give me a second on that.")
-        for kind in ("short", "long"):
-            self.assertNotIn(d.bridge(kind, "anything at all"), ("Mm.", "Um.", "Uh."), "never a bare filler")
+    def test_fillers_rotate_and_never_say_sec_minute_or_moment(self):
+        import re as _re
+        seen = []
+        for _ in range(8):
+            seen.append(d.filler("what about the TeamChat desktop one?", seen))
+        for i in range(3, len(seen)):
+            self.assertNotIn(seen[i], seen[i - 3:i], "never one of the last three")
+        self.assertIn("The TeamChat desktop one, looking.", seen)
+        for line in d.FILLERS + tuple(seen):
+            self.assertIsNone(_re.search(r"(?i)\b(sec|second|minute|moment|please wait)\b", line), line)
+        self.assertEqual(d.FILLER_AFTER, 1.5)
+        for words in ("can you hear me?", "how many agents are there", "is it done?", "Did Wispr finish?"):
+            self.assertFalse(d.wants_filler(words), words)
+        self.assertTrue(d.wants_filler("what is the GPU worker stuck on?"))
 
     async def test_a_finished_lookup_is_announced_at_a_pause_while_the_conversation_is_open(self):
         import json as _json

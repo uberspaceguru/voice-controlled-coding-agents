@@ -29,7 +29,9 @@ class Asks:
         self.reply = reply
         self.started = asyncio.Event()
 
-    async def __call__(self, *argv, timeout=60):
+    async def __call__(self, *argv, timeout=60, quiet=False):
+        if "voice-event" in argv:          # the filler's talk_log record, not an ask
+            return 0, ""
         gate = asyncio.Event()
         self.argv.append(argv)
         self.gates.append(gate)
@@ -61,8 +63,7 @@ class LateSpeech(unittest.IsolatedAsyncioTestCase):
         self.emit = self.patches.enter_context(patch("manager.emit", AsyncMock()))
         self.patches.enter_context(patch.object(FrameProcessor, "process_frame", AsyncMock()))
         # No delay token inside these tests: they pin the merge, not the bridge.
-        self.patches.enter_context(patch.object(d, "SHORT_BRIDGE_AFTER", 60.0))
-        self.patches.enter_context(patch.object(d, "LONG_BRIDGE_AFTER", 60.0))
+        self.patches.enter_context(patch.object(d, "FILLER_AFTER", 60.0))
         self.asks = Asks()
         self.patches.enter_context(patch("manager._run", self.asks))
         self.m = make_manager()
@@ -166,12 +167,12 @@ class LateSpeech(unittest.IsolatedAsyncioTestCase):
             spoken.append(text)
             return True
         self.m._say = AsyncMock(side_effect=say)
-        with patch.object(d, "SHORT_BRIDGE_AFTER", 0.01):
+        with patch.object(d, "FILLER_AFTER", 0.01):
             await self.turn("Director, tell me more about the GPU one.")
             await self.asks.wait_for(1)
             while not spoken:
                 await asyncio.sleep(0.01)
-            self.assertEqual(spoken, ["The GPU one. One sec."])
+            self.assertEqual(spoken, ["Checking."])
             await self.turn("Who is working on it?")
             await self.asks.wait_for(2)
         self.assertEqual(self.asks.words()[1], "tell me more about the GPU one. Who is working on it?")
