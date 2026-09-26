@@ -64,6 +64,16 @@ class DialogueManagerMixin(MemoryManagerMixin):
         if guard:
             guard.stage = self.dialogue.stage
 
+    def barged_in(self):
+        """He took the turn over the voice (barge_in.py said stop or claim)."""
+        self._barge_in_at = time.monotonic()
+
+    def _took_floor(self, within: float = 15.0) -> bool:
+        """Once per barge-in: was this turn started over the voice?"""
+        at = getattr(self, "_barge_in_at", None)
+        self._barge_in_at = None
+        return at is not None and time.monotonic() - at < within
+
     def _pause_for_input(self):
         # Hearing is not a semantic cancellation. Hold the execution boundary
         # while a new utterance is classified; backchannels release this hold.
@@ -117,6 +127,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
             serial = self._input_serial
         guard = TurnGuard(self.dialogue.epoch, (self.stage or {}).get("sessionId"))
         token = CURRENT_TURN.set(guard)
+        took_floor = self._took_floor()  # consumed here, whatever the turn turns out to be
         t0 = time.monotonic()
         settled = False
         try:
@@ -135,6 +146,20 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 self._input_ready.set()
                 note("you", text, "echo of the card, ignored")
                 return
+            if default and took_floor:
+                from barge_in import is_hold
+                if is_hold(text):
+                    # "Stop." "Wait." "Hold on." said over the voice: it stopped;
+                    # nothing restarts it and nothing is asked. The conversation
+                    # stays open, so what he says next is Director's.
+                    guard.epoch = self.dialogue.begin()
+                    settled = True
+                    self._judging = None
+                    self._input_ready.set()
+                    self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
+                    note("you", text, "held the floor; Director stopped")
+                    await emit(self, "listening", reason="barge_in_hold", text=text[:120])
+                    return
             now = time.monotonic()
             called = getattr(self, "_called", None)
             follow_up = (now < getattr(self, "_follow_up_until", 0.0)
@@ -156,6 +181,12 @@ class DialogueManagerMixin(MemoryManagerMixin):
                             f"{'closed ' + str(round(now - getattr(self, '_follow_up_until', 0.0), 1)) + ' s ago' if getattr(self, '_follow_up_until', 0.0) else 'never opened'}")
                 return
             if routed is not None:
+                # Said over Director's voice: what it was saying is superseded,
+                # not restarted once this turn settles. _say's one retry is for
+                # a turn that turns out not to be Director's (routed is None
+                # above), which then resumes the line (research R10).
+                if took_floor:
+                    guard.epoch = self.dialogue.begin()
                 settled = True
                 self._judging = None
                 self._input_ready.set()

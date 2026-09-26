@@ -55,6 +55,13 @@ from tts import SpokenGradiumTTSService
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     logger.info("Starting tb-voice")
+    # The Director app's WebRTC audio (local_rtc.py) arrives with the bot's own
+    # voice already cancelled out of the microphone: the gate stays open while
+    # it speaks, and a word said over it is judged by barge_in.py. Every other
+    # path (the stdio LocalAudioTransport above all) is unchanged.
+    cancels_echo = bool(getattr(runner_args, "cancels_echo", False))
+    if cancels_echo:
+        logger.info("client cancels its own echo: the gate is open and Director can be interrupted")
 
     stt = GradiumSTTService(api_key=os.environ["GRADIUM_API_KEY"])
     tts = SpokenGradiumTTSService(
@@ -71,21 +78,41 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         ),
     )
 
+    gate = Manager(JevClient(os.environ["JEV_API_KEY"]))
+    tts.deliverybook = gate.deliverybook
+
+    if cancels_echo:
+        import director_link
+        from barge_in import BargeInStrategy
+        from events import line
+
+        names = tuple(n for n in director_link.right_hands() if n)
+
+        def speaking_text() -> str:
+            delivery = getattr(gate, "_last_delivery", None)
+            return delivery.text if delivery is not None and gate._voice.locked() else ""
+
+        def verdict(label, text, ms):
+            if label in ("stop", "claim"):
+                gate.barged_in()
+            line("barge", reason=label, text=text[:120], ms=ms)
+
+        start_strategy = BargeInStrategy(speaking_text=speaking_text, names=lambda: names,
+                                         on_verdict=verdict)
+    else:
+        start_strategy = MinWordsUserTurnStartStrategy(min_words=int(os.getenv("TB_MIN_WORDS", "2")))
+
     context = LLMContext(tools=SCHEMAS)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-            user_mute_strategies=[WhileBotSpeaksMuteStrategy()],
+            user_mute_strategies=[WhileBotSpeaksMuteStrategy(cancels_own_voice=cancels_echo)],
             # A turn starts on words, not on VAD: in a loud room VAD fired 300 ms into
             # every answer and cancelled it before TTS. Two words of transcript start a
             # turn; noise and one-word backchannels do not.
             user_turn_strategies=UserTurnStrategies(
-                start=[
-                    MinWordsUserTurnStartStrategy(
-                        min_words=int(os.getenv("TB_MIN_WORDS", "2"))
-                    )
-                ],
+                start=[start_strategy],
                 stop=[
                     TurnAnalyzerUserTurnStopStrategy(
                         turn_analyzer=LocalSmartTurnAnalyzerV3(
@@ -104,9 +131,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         ),
     )
 
-    gate = Manager(JevClient(os.environ["JEV_API_KEY"]))
-    tts.deliverybook = gate.deliverybook
-
     @user_aggregator.event_handler("on_user_turn_started")
     async def on_user_turn_started(aggregator, *args):
         await gate.hearing()
@@ -121,7 +145,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     pipeline = Pipeline(
         [
             transport.input(),
-            EchoGate(),
+            EchoGate(cancels_own_voice=cancels_echo),
             stt,
             user_aggregator,
             gate,
@@ -199,6 +223,39 @@ async def run_local():
     await run_bot(transport, Args())
 
 
+async def run_local_webrtc():
+    """Hosted by the Director app with TB_AUDIO=webrtc: still the app's stdio
+    child, but the audio is the app's WebRTC engine on 127.0.0.1 (local_rtc.py),
+    which cancels the bot's voice out of the microphone."""
+
+    import local_rtc
+    from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+
+    port, token = local_rtc.settings()
+
+    async def session(connection):
+        transport = SmallWebRTCTransport(
+            webrtc_connection=connection,
+            params=TransportParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                audio_in_sample_rate=16000,
+                audio_out_sample_rate=48000,
+            ),
+        )
+
+        class Args:
+            handle_sigint = False
+            body = {}
+            session_id = "local-webrtc"
+            cancels_echo = True
+
+        await run_bot(transport, Args())
+
+    await local_rtc.serve(session, port, token)
+    logger.info("local rtc: session over; the child exits")
+
+
 if __name__ == "__main__":
     import sys
 
@@ -209,7 +266,9 @@ if __name__ == "__main__":
         logger.remove()
         logger.add("bot.log", level=os.getenv("TB_LOG", "INFO"))
 
-        asyncio.run(run_local())
+        import local_rtc
+
+        asyncio.run(run_local_webrtc() if local_rtc.requested() else run_local())
     else:
         from pipecat.runner.run import main
 
