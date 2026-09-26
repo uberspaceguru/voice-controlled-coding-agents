@@ -248,6 +248,15 @@ def ready_line(lookup: dict) -> str:
     return f"About {about}: I couldn't find that out. Want to hear what I got?"
 
 
+_LEADING_STOP = re.compile(r"(?i)^\s*(?:ok(?:ay)?[,\s]+)?(?:stop|wait|hold on|no|sorry)\s*[.,!]+\s*(?=\S)")
+
+
+def after_stop(text: str) -> str:
+    """The turn without a leading "Stop." / "Wait," that barge-in already acted on, when more words follow it."""
+    rest = _LEADING_STOP.sub("", text or "", count=1)
+    return rest if re.search(r"[A-Za-z]{2}", rest) else text
+
+
 def director_default() -> bool:
     """The host talks to Director by default (the Director app)."""
     return os.getenv("TB_DEFAULT_INTERLOCUTOR", "").strip().lower() == "director"

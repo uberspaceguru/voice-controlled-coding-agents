@@ -90,8 +90,12 @@ class DialogueManagerMixin(MemoryManagerMixin):
             guard.stage = self.dialogue.stage
 
     def barged_in(self):
-        """He took the turn over the voice (barge_in.py said stop or claim)."""
+        """He took the turn over the voice (barge_in.py said stop or claim). The conversation stays open: what he
+        says next needs no name."""
+        import director_link
         self._barge_in_at = time.monotonic()
+        self._follow_up_until = max(getattr(self, "_follow_up_until", 0.0),
+                                    time.monotonic() + director_link.FOLLOW_UP_SECS)
 
     def _took_floor(self, within: float = 15.0) -> bool:
         """Once per barge-in: was this turn started over the voice?"""
@@ -266,6 +270,9 @@ class DialogueManagerMixin(MemoryManagerMixin):
                     await emit(self, "listening", reason="barge_in_hold", text=text[:120])
                     return
             now = time.monotonic()
+            if default:
+                # "Stop. Tell me about the first one.": the stop was acted on over the voice; the rest is the turn
+                text = director_link.after_stop(text)
             held = getattr(self, "_held_fragment", None)
             if default and held and now - held[1] < director_link.HOLD_FRAGMENT_SECS:
                 # the rest of a sentence Director held as unfinished

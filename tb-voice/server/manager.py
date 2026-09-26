@@ -678,7 +678,8 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         while True:
             await asyncio.sleep(director_link.LOOKUP_POLL_S)
             try:
-                code, out = await _run(director_link.director_bin(), "--json", "lookups", "--ready", timeout=15)
+                code, out = await _run(director_link.director_bin(), "--json", "lookups", "--ready", timeout=15,
+                                       quiet=True)
                 ready = (json.loads(out).get("ready") or []) if code == 0 else []
             except Exception:  # noqa: BLE001 - a poll that fails is retried on the next one
                 ready = []
@@ -942,6 +943,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         This proves transport output, never human hearing or acknowledgment.
         """
         from exact_speech import DialogueSpeakFrame
+        started = time.monotonic()
         for attempt in range(2 if retry_interrupted else 1):
             await self._floor_ready()
             async with self._voice:
@@ -968,6 +970,11 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                     note("Tranquility", delivery.generated_text or text, "output_complete")
                     return True
             if delivery.status != "interrupted" or attempt or not self._current():
+                return False
+            # He talked over it (barge_in.py said stop or claim): that line is over, never said again. The one
+            # retry is only for a line a stray sound clipped (live check, 26 Sep: "stop", then the whole answer
+            # again 1.5 s later).
+            if (getattr(self, "_barge_in_at", None) or 0.0) >= started:
                 return False
             await self._floor_ready()
             self._require_current()

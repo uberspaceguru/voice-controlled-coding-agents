@@ -151,6 +151,12 @@ class ByName(unittest.TestCase):
         self.assertFalse(d.is_echo("yes", answer, 3.0), "one word is Ahmed's")
         self.assertFalse(d.is_echo("Should you head to San Jose California", answer, d.ECHO_SECS + 1))
 
+    def test_a_leading_stop_is_dropped_when_more_follows(self):
+        self.assertEqual(d.after_stop("Stop. Tell me about the first one."), "Tell me about the first one.")
+        self.assertEqual(d.after_stop("Wait, the second one"), "the second one")
+        self.assertEqual(d.after_stop("Stop."), "Stop.", "a bare stop stays a stop")
+        self.assertEqual(d.after_stop("Stop the build now"), "Stop the build now", "no pause after it: not a leading stop")
+
     def test_the_utterance_after_a_call_goes_to_the_one_called(self):
         self.assertEqual(d.answer_call(("ask", "what's my day?"), ("Yobi1", 100.0), 103.0),
                          ("hand", "Yobi1", "what's my day?"))

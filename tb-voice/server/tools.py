@@ -18,9 +18,11 @@ SCHEME = os.getenv("TB_URL_SCHEME", "tranquilitybase")
 SILENT = FunctionCallResultProperties(run_llm=False)
 
 
-async def _run(*argv: str, timeout: float = 45.0) -> tuple[int, str]:
-    logger.info("exec " + " ".join(argv))
-    line("tool", argv=list(argv))
+async def _run(*argv: str, timeout: float = 45.0, quiet: bool = False) -> tuple[int, str]:
+    # quiet: a background poll (Director's lookups) that must not reach the orb as a "tool" event every few seconds
+    if not quiet:
+        logger.info("exec " + " ".join(argv))
+        line("tool", argv=list(argv))
     p = await asyncio.create_subprocess_exec(
         *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
     )
