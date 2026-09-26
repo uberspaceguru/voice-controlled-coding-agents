@@ -726,7 +726,20 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             await self._bridge_while(ask, name, words, asked)
         code, out = await ask
         self._require_current()
-        reply = director_link.flatten(out) if code == 0 else ""
+        words_out, flags = director_link.director_reply(out) if code == 0 else ("", {})
+        if flags.get("close"):
+            # "that's all": the conversation is over; the next line needs a name again
+            self._follow_up_until = 0.0
+            logger.info("conversation closed by Ahmed")
+            return
+        if flags.get("incomplete"):
+            # half a sentence: held, and joined to what he says next
+            self._held_fragment = (words, time.monotonic())
+            self._follow_up_until = max(getattr(self, "_follow_up_until", 0.0),
+                                        time.monotonic() + director_link.FOLLOW_UP_SECS)
+            logger.info(f"held a fragment: {words[:80]!r}")
+            return
+        reply = director_link.flatten(words_out) if code == 0 else ""
         if code == 0 and not reply:
             # A clean exit with nothing to say is the hand choosing silence:
             # in Director's hands-free every utterance reaches it, the room's

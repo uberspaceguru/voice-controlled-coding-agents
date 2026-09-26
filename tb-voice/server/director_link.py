@@ -365,7 +365,24 @@ def director_bin() -> str:
 
 
 def ask_argv(text: str, thread: str | None = None) -> list[str]:
-    return [director_bin(), "ask", text, "--channel", "tranquility", "--external-id", thread or session_thread()]
+    # --json: Director says what the turn was, not only what to say (close, incomplete; 26 Sep)
+    return [director_bin(), "--json", "ask", text, "--channel", "tranquility", "--external-id", thread or session_thread()]
+
+
+# A half sentence Director held (its "complete" judgment) is joined to what he
+# says next within this many seconds (research/speech-acts.md Q6).
+HOLD_FRAGMENT_SECS = 6.0
+
+
+def director_reply(out: str) -> tuple[str, dict]:
+    """(the words to speak, Director's flags) from `director --json ask`; plain text is taken as the words."""
+    try:
+        d = json.loads(out)
+    except (ValueError, TypeError):
+        return out, {}
+    if isinstance(d, dict) and "reply" in d:
+        return d.get("reply") or "", d
+    return out, {}
 
 
 def flatten(reply: str) -> str:

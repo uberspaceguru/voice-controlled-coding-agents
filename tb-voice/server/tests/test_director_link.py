@@ -63,7 +63,7 @@ class Speaking(unittest.TestCase):
 
     def test_the_ask_command(self):
         argv = d.ask_argv("what needs me?", "tranquility:voice")
-        self.assertEqual(argv[1:], ["ask", "what needs me?", "--channel", "tranquility",
+        self.assertEqual(argv[1:], ["--json", "ask", "what needs me?", "--channel", "tranquility",
                                     "--external-id", "tranquility:voice"])
 
 
@@ -195,7 +195,7 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         with patch("manager._run", AsyncMock(return_value=(0, reply))) as run:
             await self.m._dialogue_turn("Director, what needs me?", None, None)
         argv = run.await_args.args
-        self.assertEqual(argv[1:], ("ask", "what needs me?", "--channel", "tranquility",
+        self.assertEqual(argv[1:], ("--json", "ask", "what needs me?", "--channel", "tranquility",
                                     "--external-id", d.THREAD))
         self.m._jev.ask.assert_not_awaited()
         said = [c.args[0] for c in self.m._say.await_args_list]
@@ -240,7 +240,7 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             self.m._do_mute = AsyncMock()
             await self.m._dialogue_turn("stop", None, None)
             await self.m._dialogue_turn("   ", None, None)
-        asked = [(c.args[2], c.args[-1]) for c in run.await_args_list]
+        asked = [(c.args[3], c.args[-1]) for c in run.await_args_list]
         self.assertEqual(asked, [("what needs me?", "ac03daf5"), ("yes", "ac03daf5"), ("the second one", "ac03daf5"),
                                  ("tell the Wispr worker yes", "ac03daf5")],
                          "named, then follow-ups, one thread; the room's talk after the window is ignored")
@@ -259,7 +259,7 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             await self.m._dialogue_turn("Yobi one.", None, None)
             await self.m._dialogue_turn("what's my day?", None, None)
         self.m._earcon.assert_awaited_with("listening")
-        self.assertEqual([c.args[1:3] if c.args[1] == "ask" else c.args[1:] for c in run.await_args_list],
+        self.assertEqual([c.args[2:4] if c.args[1] == "--json" else c.args[1:] for c in run.await_args_list],
                          [("ask", "What needs me?"), ("what's my day?",)], "one ask each, the second to Yobi1")
 
     async def test_one_voice_silence_is_silence_and_a_failure_is_said_once(self):
@@ -353,6 +353,24 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             await self.m._watch_lookups(once=True)
         self.m._say.assert_not_awaited()
         self.m._earcon.assert_awaited_once_with("returned")
+
+    async def test_directors_close_and_incomplete_are_acted_on(self):
+        import json as _json
+        import time as _time
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        replies = [(0, _json.dumps({"reply": "", "incomplete": True})),
+                   (0, _json.dumps({"reply": "The second one is TeamChat.", "incomplete": False})),
+                   (0, _json.dumps({"reply": "", "close": True}))]
+        run = AsyncMock(side_effect=replies)
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()):
+            await self.m._dialogue_turn("Director, and the second one is", None, None)
+            await self.m._dialogue_turn("the TeamChat one?", None, None)
+            self.assertEqual(run.await_args_list[1].args[3], "and the second one is the TeamChat one?",
+                             "the rest is joined to the held half")
+            await self.m._dialogue_turn("thanks, that's all", None, None)
+        self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["The second one is TeamChat."])
+        self.assertEqual(self.m._follow_up_until, 0.0, "closed: the next line needs a name")
 
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)

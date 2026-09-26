@@ -136,6 +136,11 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 note("you", text, "echo of the card, ignored")
                 return
             now = time.monotonic()
+            held = getattr(self, "_held_fragment", None)
+            if default and held and now - held[1] < director_link.HOLD_FRAGMENT_SECS:
+                # the rest of a sentence Director held as unfinished
+                text = f"{held[0]} {text}"
+                self._held_fragment = None
             called = getattr(self, "_called", None)
             follow_up = (now < getattr(self, "_follow_up_until", 0.0)
                          or bool(called and now - called[1] < director_link.CALL_WINDOW))
