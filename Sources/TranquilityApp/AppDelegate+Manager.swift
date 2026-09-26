@@ -93,15 +93,17 @@ extension AppDelegate {
     /// and keeps it there; the list is the idle view, back after 60 s with no
     /// turn and no voice (Ahmed, 26 Sep: the list during a conversation is
     /// useless). Room sound alone never flips the panel. Only with right-hands.
-    func noteConversation(_ sentence: String?) {
+    func noteConversation(_ sentence: String?, newTurn: Bool = false) {
         guard managerIsOn, let hands = RightHands.current(),
               let director = hands.order.first(where: { hands.names[$0] == "Director" }) else { return }
         conversationIdle?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.endConversationCard() }
         conversationIdle = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.conversationIdleSecs, execute: work)
-        if sentence == nil && hud.conversationCard { return }        // already up: keep its last sentence
-        let line = sentence ?? "Listening."
+        // Already up: a quiet keeps the last sentence; his next turn clears it
+        // (tb-card-text: the stale reply stayed while the talk moved on).
+        if sentence == nil && hud.conversationCard && !newTurn { return }
+        let line = sentence ?? (newTurn && hud.conversationCard ? "…" : "Listening.")
         hud.conversationCard = true
         returnToGridWork?.cancel()
         announceTask?.cancel()
@@ -117,11 +119,38 @@ extension AppDelegate {
 
     static let conversationIdleSecs: TimeInterval = 60
 
+    /// A transcript piece from the microphone. His first words after
+    /// Director spoke start a new line; interim pieces replace each other.
+    func noteHeard(_ text: String, final: Bool) {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty else { return }
+        if heardFresh { heardFinals = []; heardInterim = ""; heardFresh = false }
+        if final { heardFinals.append(words); heardInterim = "" } else { heardInterim = words }
+        hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: "hearing")
+    }
+
+    /// The strip under the orb: his words this turn, quoted, the newest end
+    /// kept when it runs long; else the state word.
+    func orbLine(_ fallback: String) -> String {
+        let said = (heardFinals + (heardInterim.isEmpty ? [] : [heardInterim])).joined(separator: " ")
+        return said.isEmpty ? fallback : Self.heardStrip(said)
+    }
+
+    static let heardStripMost = 150
+
+    static func heardStrip(_ said: String) -> String {
+        guard said.count > heardStripMost else { return "\u{201C}\(said)\u{201D}" }
+        let tail = said.suffix(heardStripMost)
+        let cut = tail.firstIndex(of: " ").map { tail[tail.index(after: $0)...] } ?? tail
+        return "\u{201C}\u{2026}\(cut)\u{201D}"
+    }
+
     func endConversationCard() {
         conversationIdle?.cancel()
         conversationIdle = nil
         guard hud.conversationCard else { return }
         hud.conversationCard = false
+        heardFinals = []; heardInterim = ""; heardFresh = true
         Permissions.log("hands-free: a minute without a turn; the list again")
         showIdleGrid()
     }
@@ -257,6 +286,9 @@ extension AppDelegate {
                 await AppDelegate.answerManagerRequest(argv)
             }
             peer.onTrace = { line in Permissions.log("manager audio wire: \(line)") }
+            peer.onTranscript = { text, final in
+                Task { @MainActor [weak self] in self?.noteHeard(text, final: final) }
+            }
             let lines = peer.lines()
             do { try peer.start() } catch {
                 Permissions.log("manager: local audio peer failed \(error); ending the child")
@@ -578,6 +610,9 @@ extension AppDelegate {
                 await AppDelegate.answerManagerRequest(argv)
             }
             peer.onTrace = { line in Permissions.log("manager wire: \(line)") }
+            peer.onTranscript = { text, final in
+                Task { @MainActor [weak self] in self?.noteHeard(text, final: final) }
+            }
             do { try peer.start() } catch {
                 self.hud.showResult("Hands-free could not open the microphone: \(error.localizedDescription)")
                 Permissions.log("manager: webrtc peer failed \(error)")
@@ -803,28 +838,38 @@ extension AppDelegate {
                 sendManagerCommand(["cmd": "stage", "session": pending.session, "name": pending.name])
             }
         case .hearing:
-            hud.setManagerState(StatusHUD.orbState, line: "hearing you", mood: "hearing")
+            hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: "hearing")
         case .listening:
             break  // silent on a turn: whatever was last said stays on the panel
         case .addressed:
-            hud.setManagerState(StatusHUD.orbState, line: Self.intentLine(e.intent))
-            noteConversation(nil)
+            if heardFinals.isEmpty && heardInterim.isEmpty, let text = e.text { noteHeard(text, final: true) }
+            hud.setManagerState(StatusHUD.orbState, line: orbLine(Self.intentLine(e.intent)))
+            noteConversation(nil, newTurn: true)
         case .speaking:
-            managerLastLine = e.text ?? (e.voice == "agent" ? "the agent is speaking" : "speaking")
-            hud.setManagerState(StatusHUD.orbState, line: managerLastLine, mood: "speaking")
-            if e.voice != "agent" { noteConversation(e.text) }
+            if e.voice == "agent" {
+                managerLastLine = e.text ?? "the agent is speaking"
+                hud.setManagerState(StatusHUD.orbState, line: managerLastLine, mood: "speaking")
+            } else {
+                // Director's sentence is on the card body, once and whole; the
+                // strip under the orb keeps what he said (tb-card-text, 26 Sep).
+                managerLastLine = "speaking"
+                heardFresh = true
+                hud.setManagerState(StatusHUD.orbState, line: orbLine("speaking"), mood: "speaking")
+                noteConversation(e.text)
+            }
         case .reloading:
             hud.setManagerState(StatusHUD.orbState, line: "reloading")
         case .quiet:
             noteConversation(nil)            // the conversation is still going: keep the card up
             // Voice over: colour back to rest, the last words stay readable.
-            hud.setManagerState(StatusHUD.orbState, line: managerLastLine == "speaking" ? "listening" : managerLastLine)
+            hud.setManagerState(StatusHUD.orbState,
+                                line: managerLastLine == "speaking" ? orbLine("listening") : managerLastLine)
         case .stage:
             hud.setManagerState(StatusHUD.orbState, line: "on stage: \(e.name ?? e.goal ?? e.project ?? "")")
         case .earcon:
             if let name = e.name, let cue = EarconGate.Cue(rawValue: name) { Earcons.acknowledge(cue) }
         case .tool:
-            hud.setManagerState(StatusHUD.orbState, line: e.meaning.map { "sent: \($0)" } ?? "working")
+            hud.setManagerState(StatusHUD.orbState, line: orbLine(e.meaning.map { "sent: \($0)" } ?? "working"))
         case .error:
             hud.setManagerState(StatusHUD.orbState, line: "something failed; check the log")
         case .idle:

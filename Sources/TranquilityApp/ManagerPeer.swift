@@ -56,6 +56,9 @@ final class ManagerPeer: NSObject, ManagerTransport, @unchecked Sendable {
     private var continuation: AsyncStream<Data>.Continuation?
 
     var onTrace: (@Sendable (String) -> Void)?
+    /// What the microphone heard, as the framework transcribes it (RTVI
+    /// `user-transcription`): the words, and whether they are final.
+    var onTranscript: (@Sendable (String, Bool) -> Void)?
 
     /// STUN for a bot across the internet; none for one on 127.0.0.1, where
     /// host candidates are the whole story and a STUN query is only a leak.
@@ -342,6 +345,11 @@ extension ManagerPeer: LKRTCDataChannelDelegate {
         // reached the viewer as rows of "Invalid" with undefined fields
         // (23 Sep), because the WebSocket serializer had never passed anything
         // but our lines and everything downstream assumed that.
+        if obj["type"] as? String == "user-transcription", let d = obj["data"] as? [String: Any],
+           let text = d["text"] as? String {
+            onTranscript?(text, d["final"] as? Bool ?? false)
+            return
+        }
         guard let kind = obj["event"] as? String else {
             onTrace?("ignored a \(obj["type"] as? String ?? "framework") message, \(data.count)b")
             return

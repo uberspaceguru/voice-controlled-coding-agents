@@ -189,6 +189,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var managerPeer: ManagerPeer?
     var managerTask: Task<Void, Never>?
     var managerLastLine = "listening"
+    /// Hands-free's transcript strip, under the orb (tb-card-text, 26 Sep):
+    /// what he said this turn, final pieces and the piece still being heard.
+    var heardFinals: [String] = []
+    var heardInterim = ""
+    /// Director spoke since he last did: his next words start a new line.
+    var heardFresh = true
     /// A right-hand whose card was opened before the manager was ready to take
     /// it on stage (23 Sep): handed over on the child's `ready` line.
     var pendingStage: (session: String, name: String)?
