@@ -126,6 +126,11 @@ class ByName(unittest.TestCase):
         self.assertEqual(d.route_default("Directors, status"), ("ask", "status"))
         self.assertEqual(d.route_default("Hey, Director, can you hear me?"), ("ask", "can you hear me?"))
         self.assertIsNone(d.route_default("Andrew, pass the salt."), "not near enough")
+        for heard in ("I direct. Are you still there?", "Directory, are you still there?",
+                      "Direct her, are you still there?", "The rector. Are you still there?"):
+            self.assertEqual(d.route_default(heard)[0:1], ("ask",), heard)
+            self.assertEqual(d.route_default(heard)[1].lower(), "are you still there?", heard)
+        self.assertIsNone(d.route_default("I direct the whole thing myself."), "no stop after it: not a name")
 
     def test_the_real_microphone_spellings(self):
         # Measured through the MacBook microphone, 25 Sep.

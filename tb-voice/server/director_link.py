@@ -207,10 +207,19 @@ def director_default() -> bool:
 DIRECTOR_NAMES = ("Director", "Tranquility")
 
 
+# How the transcriber writes "Director" when it gets it wrong, before a stop
+# (Director's own gate lists the same; "I direct." heard on Ahmed's first
+# session, 25 Sep 19:44).
+_MISHEARD = re.compile(r"(?i)^\s*(?:(?:hey|hi|ok(?:ay)?)[,\s]+)?(?:i\s+direct|directory|direct(?:\s+her|er|ors?)|"
+                       r"the\s+rector|a\s+director)\s*[,.:;!?-]+\s*")
+
+
 def _director_vocative(t: str) -> str | None:
     """The rest of the turn when it opens by calling Director (or Tranquility),
     exactly or near enough before a real stop; else None."""
-    m = _VOCATIVE.match(t) or re.match(r"(?i)^\s*(?:(?:hey|hi|ok(?:ay)?)[,\s]+)?tranquill?ity\s*(?:[,.:;!?-]+\s*|$)", t)
+    m = (_VOCATIVE.match(t)
+         or re.match(r"(?i)^\s*(?:(?:hey|hi|ok(?:ay)?)[,\s]+)?tranquill?ity\s*(?:[,.:;!?-]+\s*|$)", t)
+         or _MISHEARD.match(t))
     if m:
         return t[m.end():]
     body = t[_OPENER.match(t).end():]
