@@ -309,9 +309,10 @@ extension AppDelegate {
                 Analytics.gesture("ctrl_ctrl", phase: "tapped", decision: "ignored_mic_open", face: hud.state)
                 return
             }
-            // A right-hand's card offers More (24 Sep, ruling 5): ⌃⌃ asks it.
-            if moreOnBrainCard() {
-                Analytics.gesture("ctrl_ctrl", phase: "tapped", decision: "brain_more", face: hud.state)
+            // A right-hand's card offers More (24 Sep, ruling 5): ⌃⌃ asks it
+            // to go on, once at a time (26 Sep).
+            if let decision = moreOnBrainCard() {
+                Analytics.gesture("ctrl_ctrl", phase: "tapped", decision: decision, face: hud.state)
                 return
             }
             guard let announcement = lastAnnouncement else {

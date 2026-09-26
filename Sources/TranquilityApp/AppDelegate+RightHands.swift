@@ -42,6 +42,13 @@ extension AppDelegate {
         expandedHand = id
         expandedAll = false
         Permissions.log("right-hands: \(hand.name ?? id.prefix(8).description) opened")
+        // One ask at a time per hand (26 Sep): a hand reopened while its brain
+        // is still answering draws its card and says its own summary, and
+        // asks nothing on top of the answer in flight.
+        let asking = hand.asks && RightHands.BrainAsks.shared.begin(id) == .go
+        if hand.asks, !asking {
+            Permissions.log("right-hands: \(hand.name ?? "Director") is still answering; opened without asking")
+        }
         Task.detached(priority: .userInitiated) { [weak self] in
             let card = RightHands.card(for: hand)
             if let card { RightHands.CardCache.shared.put(card, for: id) }
@@ -54,7 +61,7 @@ extension AppDelegate {
             // summary first (25 Sep, tb-indicators): it counts exactly the
             // filled lines drawn below, so the ear and the dots agree.
             var said: String?
-            if hand.asks, card?.panelLines.isEmpty == false || card?.panelSummary == nil,
+            if asking, card?.panelLines.isEmpty == false || card?.panelSummary == nil,
                case .success(let line) = RightHands.ask(
                 hand, text: "what needs me?", conversation: id, session: id) {
                 said = line
@@ -62,6 +69,7 @@ extension AppDelegate {
             let line = card?.panelSummary ?? said
             RightHands.CardCache.shared.putSaid(line, for: id)
             await MainActor.run { [weak self] in
+                if asking { self?.finishBrainAsk(id) }
                 guard let self, self.expandedHand == id else { return }
                 self.showIdleGrid()
                 guard let line else {
@@ -114,22 +122,65 @@ extension AppDelegate {
     }
 
     /// ⌃⌃ on a hand's card is More (ruling 5: a card that speaks offers
-    /// More). True when it was handled here.
-    func moreOnBrainCard() -> Bool {
+    /// More). Nil when it is not a brain hand's card; otherwise the
+    /// decision, for the gesture's analytics.
+    ///
+    /// More continues the card's own conversation (26 Sep, session audit
+    /// "duplicate turn"): "go on", in the card's thread, where Director keeps
+    /// the numbered list and its last turns. It used to ask a fixed "what
+    /// needs me?", which answered a different question from the one the card
+    /// had just asked ("Want to hear the rest?"). A press while the brain is
+    /// still answering is acknowledged and asks nothing.
+    func moreOnBrainCard() -> String? {
         guard hud.state.isCardOnStage, let id = hud.currentTarget?.sessionId,
-              let hand = RightHands.hand(for: id), hand.asks else { return false }
-        askBrain("what needs me?", of: id, name: hand.name ?? "Director")
-        return true
+              let hand = RightHands.hand(for: id), hand.asks else { return nil }
+        let name = hand.name ?? "Director"
+        if hud.face.placardOverride == RightHands.testSummonsPlacard {
+            // A test's answer was asked in a thread of its own; "go on" in
+            // the card's thread would continue something else.
+            Permissions.log("right-hands: \(name) more on a test summons card; not asked")
+            hud.acknowledge(.registered)
+            return "brain_more_test_card"
+        }
+        return askBrain(RightHands.moreRequest, of: id, name: name) == .go ? "brain_more" : "brain_busy"
     }
 
     /// Ask the hand's brain and speak its answer on its card. Off the main
     /// thread: the brain is a subprocess.
-    func askBrain(_ text: String, of id: String, name: String, fallback: String? = nil) {
-        guard let hand = RightHands.hand(for: id), hand.asks else { return }
+    ///
+    /// One ask at a time per hand (26 Sep): while one is in flight, a gesture
+    /// or a tap is acknowledged (blue: received, not acted on) and asks
+    /// nothing; `queueIfBusy` keeps words said to the hand, asked after the
+    /// answer in flight rather than on top of it.
+    @discardableResult
+    func askBrain(_ text: String, of id: String, name: String, fallback: String? = nil,
+                  queueIfBusy: Bool = false) -> RightHands.BrainAsks.Admission? {
+        guard let hand = RightHands.hand(for: id), hand.asks else { return nil }
+        let admission = RightHands.BrainAsks.shared.begin(id, queueing: queueIfBusy ? text : nil)
+        switch admission {
+        case .go:
+            runBrainAsk(text, of: id, hand: hand, name: name, fallback: fallback)
+        case .queued:
+            Permissions.log("right-hands: \(name) is still answering; queued: \(text.prefix(80))")
+        case .busy:
+            Permissions.log("right-hands: \(name) is still answering; ignored: \(text.prefix(80))")
+            hud.acknowledge(.registered)
+        }
+        return admission
+    }
+
+    /// The ask itself, with the hand already claimed. The card on stage for
+    /// this hand says it is asking at once, so a press never looks lost
+    /// while the brain thinks.
+    private func runBrainAsk(_ text: String, of id: String, hand: RightHands.Hand, name: String,
+                             fallback: String?) {
         Permissions.log("right-hands: asking \(name): \(text.prefix(80))")
+        let working = hud.showCardWorking(for: id, "\(StateLegend.Glyph.quiet) ASKING \(name.uppercased())…")
         Task.detached(priority: .userInitiated) { [weak self] in
             let result = RightHands.ask(hand, text: text, conversation: id, session: id)
             await MainActor.run { [weak self] in
+                if let working { self?.hud.endCardWorking(working) }
+                defer { self?.finishBrainAsk(id) }
                 switch result {
                 case .success(let line): self?.speakOnCard(line, as: id, name: name)
                 case .failure(let why):
@@ -139,6 +190,18 @@ extension AppDelegate {
                 }
             }
         }
+    }
+
+    /// The ask in flight for this hand has answered: release it, or ask the
+    /// words that were said to it meanwhile.
+    private func finishBrainAsk(_ id: String) {
+        guard let next = RightHands.BrainAsks.shared.finish(id) else { return }
+        guard let hand = RightHands.hand(for: id), hand.asks else {
+            // The roster changed under the queue; nothing can be asked.
+            while RightHands.BrainAsks.shared.finish(id) != nil {}
+            return
+        }
+        runBrainAsk(next, of: id, hand: hand, name: hand.name ?? "Right-hand", fallback: nil)
     }
 
     /// A line on a card named for the hand (ruling 7), in its voice.
@@ -181,7 +244,11 @@ extension AppDelegate {
         func id(named name: String) -> String? {
             hands.order.first { (hands.names[$0] ?? "").caseInsensitiveCompare(name) == .orderedSame }
         }
-        Permissions.log("summons: to \(s.to) from \(s.app ?? "-"): \(s.text.prefix(80))")
+        Permissions.log("summons: \(s.test ? "TEST " : "")to \(s.to) from \(s.app ?? "-"): \(s.text.prefix(80))")
+        if s.test {
+            testSummons(s, hands: hands, id: id(named:))
+            return
+        }
         if s.to == "yobi1" {
             guard let yobi = id(named: "Yobi1") else { return }
             let running = !NSRunningApplication.runningApplications(withBundleIdentifier: "io.yobi.yobi1.fable").isEmpty
@@ -189,16 +256,22 @@ extension AppDelegate {
                 speakOnCard("Yobi1 isn't running, so I couldn't pass that on.", as: yobi, name: "Yobi1", force: true)
                 return
             }
-            askBrain(s.text, of: yobi, name: "Yobi1")
+            // His own words: they wait behind an answer in flight, never refused.
+            askBrain(s.text, of: yobi, name: "Yobi1", queueIfBusy: true)
             return
         }
         guard let director = id(named: "Director") else { return }
         let thread = hands.hands[director]?.session ?? director
+        // A summons is Ahmed's own words, so it is never refused; it claims
+        // Director when it is free, so a ⌃⌃ while it is answered asks nothing.
+        let claimed = RightHands.BrainAsks.shared.begin(director) == .go
+        if !claimed { Permissions.log("summons: Director is already answering; asked anyway") }
         hud.showResult("Asking Director…")
         Task.detached(priority: .userInitiated) { [weak self] in
             let result = RightHands.summon(s, thread: thread)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                if claimed { self.finishBrainAsk(director) }
                 switch result {
                 case .success(let line) where !line.isEmpty:
                     Permissions.log("summons: Director answered: \(line.prefix(120))")
@@ -213,10 +286,90 @@ extension AppDelegate {
         }
     }
 
+    /// A test summons (`test=1`, 26 Sep): never spoken, never in the card's
+    /// own thread. Director is asked in a thread beside the card's
+    /// (`RightHands.testThread`), so the answer does not become the turn
+    /// "go on" continues; Yobi1 is not asked at all (its brain has no thread
+    /// of its own to keep a test out of). What came back is logged and shown
+    /// under the TEST SUMMONS placard, unless the panel is busy: then the
+    /// log is the whole record, so a test never talks over or covers a real
+    /// card.
+    private func testSummons(_ s: DeepLink.Summons, hands: RightHands.Resolved,
+                             id: (String) -> String?) {
+        let name = s.to == "yobi1" ? "Yobi1" : "Director"
+        guard let hand = id(name) else {
+            Permissions.log("summons: TEST for \(name), who is not on the roster; dropped")
+            return
+        }
+        guard s.to != "yobi1" else {
+            showTestSummons("Test summons for Yobi1, not passed on: \(s.text)", as: hand, name: name)
+            return
+        }
+        let thread = RightHands.testThread(hands.hands[hand]?.session ?? hand)
+        Task.detached(priority: .utility) { [weak self] in
+            let result = RightHands.summon(s, thread: thread)
+            await MainActor.run { [weak self] in
+                switch result {
+                case .success(let line) where !line.isEmpty:
+                    Permissions.log("summons: TEST answered (not spoken): \(line.prefix(120))")
+                    self?.showTestSummons(line, as: hand, name: name)
+                case .success:
+                    Permissions.log("summons: TEST, Director chose silence")
+                    self?.showTestSummons("Test summons: Director chose silence.", as: hand, name: name)
+                case .failure(let why):
+                    Permissions.log("summons: TEST, Director did not answer: \(why)")
+                    self?.showTestSummons("Test summons: Director didn't answer.", as: hand, name: name)
+                }
+            }
+        }
+    }
+
+    /// A test summons on the hand's card, labelled and silent.
+    private func showTestSummons(_ text: String, as id: String, name: String) {
+        guard !hud.isCapturingAudio, !hud.state.ownsStage, coordinator?.speech.isSpeaking != true else {
+            Permissions.log("summons: TEST not shown; the panel is in use")
+            return
+        }
+        let spoken = SpokenTextSanitizer().sanitize(
+            String(text.prefix(1200)),
+            allowing: SpokenTextSanitizer.speakableTerms(in: text).union([name]))
+        returnToGridWork?.cancel()
+        let shown = hud.showAnnouncement(spoken: spoken, sessionId: id, pid: nil, project: name,
+                                         cwd: nil, eventId: id, placard: RightHands.testSummonsPlacard)
+        Permissions.log("summons: TEST \(shown ? "shown on \(name)'s card, silent" : "not shown; the stage refused it")")
+    }
+
     /// The hands' cards, refreshed in the background when they are stale.
     func refreshHandCards(_ hands: [String: RightHands.Hand]) {
         let carded = hands.filter { $0.value.hasCard }
         guard !carded.isEmpty else { return }
         Task.detached(priority: .utility) { RightHands.CardCache.shared.refresh(carded) }
+    }
+}
+
+/// The card's short "working" state (26 Sep): while a hand's brain is asked
+/// from its own card, the card's placard says so, so a ⌃⌃ or a tap is
+/// visibly in hand before the answer arrives. Only the placard changes: the
+/// words on the card, its target and its doors stay as they were.
+extension StatusHUD {
+    struct CardWorking {
+        let label: String
+        let previous: String
+    }
+
+    /// Nil when this hand's card is not on stage.
+    func showCardWorking(for sessionId: String, _ label: String) -> CardWorking? {
+        guard state.isCardOnStage, currentTarget?.sessionId == sessionId else { return nil }
+        let working = CardWorking(label: label, previous: face.placardOverride)
+        face.placardOverride = label
+        render()
+        return working
+    }
+
+    /// Put the placard back, unless the card has moved on since.
+    func endCardWorking(_ working: CardWorking) {
+        guard face.placardOverride == working.label else { return }
+        face.placardOverride = working.previous
+        render()
     }
 }

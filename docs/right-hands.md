@@ -212,3 +212,45 @@ waiting on me matter." They tell the same truth as the spoken sentence.
   Sys-3PO, its open `s3po-health` alerts.
 - **Refresh:** cards refresh every 10 seconds and the grid redraws every 5 seconds,
   so a dot changes with no tap.
+
+## The Whisper key's summons, and a test of it (26 Sep)
+
+`tbdirector://summon?to=director&text=…` (optional `app`, `title`,
+`selection`, `pane`) asks the named hand (`director` or `yobi1`) and speaks the
+answer on its card. Director is asked with `director ask … --channel summons`
+in the card's thread.
+
+**`test=1`** (also `true`, `yes`) marks a test of that path, sent by a tool or
+an agent rather than by Ahmed, for example
+`tbdirector://summon?to=director&text=what%20is%20ready&test=1`. A test
+summons is **never spoken**. It is logged (`summons: TEST …` in `app.log`) and
+shown on the hand's card under the placard **TEST SUMMONS**, so it cannot
+surprise him. It is only shown when the panel is free: if he is speaking, a
+card is talking, or a capture owns the stage, the log is the only record.
+Director is asked in a thread beside the card's (`<thread>:test`), so a test's
+answer is never the turn that ⌃⌃ continues. Yobi1 is not asked at all, because
+its brain has no separate thread to keep a test out of; the card shows the
+words that would have gone to it. Earned 25 Sep: another agent's
+`--summons-test` spoke on his speakers unprompted, and he could not tell where
+it came from.
+
+## ⌃⌃ on a brain hand's card (26 Sep)
+
+⌃⌃ on a right-hand's card is More. It asks the hand's brain **"go on"** in the
+card's own thread. Director keeps the numbered list and its last turns per
+thread, so this continues whatever the card was saying ("…Want to hear the
+rest?"). It used to ask a fixed "what needs me?", which answered a different
+question.
+
+**Only one brain ask runs at a time for each hand** (`RightHands.BrainAsks`).
+This covers ⌃⌃, item and summary taps, and opening a hand. A press that arrives
+while an ask is in flight asks nothing. The light turns blue ("received, not
+acted on") and `app.log` says `… is still answering; ignored`. Words said to the
+hand by voice are never dropped. They wait and are asked when the answer in
+flight has arrived. A summons is never refused; while it is being answered, a
+⌃⌃ asks nothing. Earned 25 Sep: two ⌃⌃ presses 1.9 s apart sent two asks on one
+thread, and the second answer cut off the first about 3 s into it.
+
+While the brain is being asked, the card's placard reads **◌ ASKING
+DIRECTOR…** (or the hand's name) until the answer arrives, so a press never
+looks lost. ⌃⌃ on a TEST SUMMONS card asks nothing.

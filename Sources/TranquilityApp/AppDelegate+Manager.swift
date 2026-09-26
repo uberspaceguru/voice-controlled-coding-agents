@@ -721,8 +721,11 @@ extension AppDelegate {
             // the answer is spoken on the hand's own card, as a tapped reply is.
             guard let session = e.session, let text = e.text, !text.isEmpty else { break }
             let name = RightHands.hand(for: session)?.name ?? e.name ?? "Right-hand"
-            hud.setManagerState(StatusHUD.orbState, line: "asking \(name)")
-            askBrain(text, of: session, name: name)
+            // Words said to a hand wait behind an answer in flight (26 Sep);
+            // they are never dropped and never asked on top of it.
+            let admission = askBrain(text, of: session, name: name, queueIfBusy: true)
+            hud.setManagerState(StatusHUD.orbState,
+                                line: admission == .queued ? "\(name) is still answering; next" : "asking \(name)")
         }
     }
 
