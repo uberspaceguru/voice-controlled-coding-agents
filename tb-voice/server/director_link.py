@@ -373,9 +373,17 @@ def director_bin() -> str:
             or os.path.expanduser("~/.local/bin/director"))
 
 
-def ask_argv(text: str, thread: str | None = None) -> list[str]:
-    # --json: Director says what the turn was, not only what to say (close, incomplete; 26 Sep)
-    return [director_bin(), "--json", "ask", text, "--channel", "tranquility", "--external-id", thread or session_thread()]
+def ask_argv(text: str, thread: str | None = None, named: bool = False) -> list[str]:
+    # --json: Director says what the turn was, not only what to say (close, incomplete; 26 Sep).
+    # --named: this voice heard his name for Director and took it off the words, so Director must not judge the
+    # bare words again ("can you hear me?" alone scored 0.28 and was dropped, 25 Sep 22:45).
+    return ([director_bin(), "--json", "ask", text] + (["--named"] if named else [])
+            + ["--channel", "tranquility", "--external-id", thread or session_thread()])
+
+
+def named_director(text: str) -> bool:
+    """The turn opens by calling Director (or Tranquility, or a known mishearing of either)."""
+    return _director_vocative((text or "").strip()) is not None
 
 
 # A half sentence Director held (its "complete" judgment) is joined to what he

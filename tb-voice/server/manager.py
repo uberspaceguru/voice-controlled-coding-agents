@@ -726,7 +726,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                 BRIDGING.reset(token)
             self._require_current()
 
-    async def _relay_hand(self, name: str, words: str, text: str):
+    async def _relay_hand(self, name: str, words: str, text: str, *, named: bool = False):
         """'Director, …', 'Yobi1, …', 'Sys-3PO, …': the hand answers, never this
         voice. Its `ask` runs here (Director's in the session's one thread, so
         "yes" and "the second one" bind); the answer is spoken on the hand's
@@ -738,8 +738,8 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         if not hand.get("session"):
             await self._say(f"{name} isn't connected yet.", response_mode="receipt")
             return
-        argv = (director_link.ask_argv(words) if name == "Director"
-                else director_link.hand_argv(hand, words))
+        argv = (director_link.ask_argv(words, named=named or director_link.named_director(text))
+                if name == "Director" else director_link.hand_argv(hand, words))
         if not argv:
             await self._relay_hand("Director", text, text) if director_link.hand_named("Director") \
                 else await self._relay_director(text)

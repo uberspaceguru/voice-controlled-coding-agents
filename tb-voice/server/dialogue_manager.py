@@ -279,6 +279,9 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 text = f"{held[0]} {text}"
                 self._held_fragment = None
             called = getattr(self, "_called", None)
+            # "Director." then the question: the name was heard, just on its own line
+            called_director = bool(called and called[0] == "Director"
+                                   and now - called[1] < director_link.CALL_WINDOW)
             follow_up = (now < getattr(self, "_follow_up_until", 0.0)
                          or bool(called and now - called[1] < director_link.CALL_WINDOW))
             if route is not None:
@@ -333,7 +336,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 elif routed[0] == "hand":
                     await self._relay_hand(routed[1], routed[2], text)
                 elif director_link.hand_named("Director"):
-                    await self._relay_hand("Director", routed[1], text)
+                    await self._relay_hand("Director", routed[1], text, named=called_director)
                 else:
                     await self._relay_director(routed[1])
                 return

@@ -201,7 +201,7 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         with patch("manager._run", AsyncMock(return_value=(0, reply))) as run:
             await self.m._dialogue_turn("Director, what needs me?", None, None)
         argv = run.await_args.args
-        self.assertEqual(argv[1:], ("--json", "ask", "what needs me?", "--channel", "tranquility",
+        self.assertEqual(argv[1:], ("--json", "ask", "what needs me?", "--named", "--channel", "tranquility",
                                     "--external-id", d.THREAD))
         self.m._jev.ask.assert_not_awaited()
         said = [c.args[0] for c in self.m._say.await_args_list]
@@ -377,6 +377,25 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             await self.m._dialogue_turn("thanks, that's all", None, None)
         self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["The second one is TeamChat."])
         self.assertEqual(self.m._follow_up_until, 0.0, "closed: the next line needs a name")
+
+    async def test_a_named_turn_tells_director_it_was_named(self):
+        # 25 Sep 22:45: "Director, can you hear me?" went out as "can you hear me?", Director's gate scored the bare
+        # words 0.28 and dropped it, and with nothing spoken every later line was ignored.
+        from unittest.mock import AsyncMock, patch
+        self.m._earcon = AsyncMock()
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        run = AsyncMock(return_value=(0, '{"reply": "Yes, I hear you."}'))
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()):
+            await self.m._dialogue_turn("Director, can you hear me?", None, None)
+            await self.m._dialogue_turn("Director.", None, None)
+            await self.m._dialogue_turn("are you there?", None, None)
+            self.m._follow_up_until = self.m._follow_up_until  # the window is open after a spoken answer
+            await self.m._dialogue_turn("and the list?", None, None)
+        argvs = [c.args for c in run.await_args_list]
+        self.assertEqual(argvs[0][3], "can you hear me?")
+        self.assertIn("--named", argvs[0], "the name was heard")
+        self.assertIn("--named", argvs[1], "a call, then the question")
+        self.assertNotIn("--named", argvs[2], "a follow-up without the name is Director's to judge")
 
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)
