@@ -21,7 +21,21 @@ class TurnGuard:
     stage: str | None
 
 
+@dataclass
+class OpenTurn:
+    """The last committed turn, while its reply has not started: late speech
+    joins it (research/turn-taking.md R3). `route` is set once it is known to
+    be an ask of Director or a hand; `replying` once its reply is spoken."""
+    text: str
+    task: asyncio.Task
+    route: tuple | None = None
+    replying: bool = False
+
+
 CURRENT_TURN = ContextVar("manager_dialogue_turn", default=None)
+# Set while a delay token ("The GPU one. One sec.") is spoken: that is not the
+# reply, and speech after it still joins the turn.
+BRIDGING = ContextVar("manager_bridging", default=False)
 
 
 class DialogueManagerMixin(MemoryManagerMixin):
@@ -38,6 +52,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
         self._input_ready = asyncio.Event()
         self._input_ready.set()
         self._deliveries = set()
+        self._open_turn = None
 
     def _current(self):
         guard = CURRENT_TURN.get()
@@ -102,15 +117,59 @@ class DialogueManagerMixin(MemoryManagerMixin):
         await emit(self, "dialogue", reason="empty_input_stopped", operation="silent")
         return True
 
-    def _schedule_dialogue(self, text, frame, direction, key=None):
+    def _schedule_dialogue(self, text, frame, direction, key=None, route=None):
         if not self.dialogue.accept(key):
             return False
         self._pause_for_input()
-        self._handler = asyncio.create_task(self._handle_turn(text, frame, direction, self._input_serial))
+        if route is None:
+            self._handler = asyncio.create_task(self._handle_turn(text, frame, direction, self._input_serial))
+        else:
+            self._handler = asyncio.create_task(
+                self._handle_turn(text, frame, direction, self._input_serial, route=route))
         self._judging = self._handler
+        self._open_turn = OpenTurn(text, self._handler)
         return True
 
-    async def _dialogue_turn(self, text, frame, direction, serial=None):
+    # -- late speech ----------------------------------------------------------------
+
+    def _this_turn(self):
+        turn = self._open_turn
+        return turn if turn is not None and turn.task is asyncio.current_task() else None
+
+    def _reply_starting(self):
+        if BRIDGING.get():
+            return
+        turn = self._this_turn()
+        if turn is not None:
+            turn.replying = True
+
+    def _merge_late(self, text: str):
+        """Speech committed after a turn but before its reply started joins
+        that turn: the pending ask is cancelled and re-run with both parts.
+        Returns (merged text, route) or None when the words are a turn of
+        their own. 25 Sep: "So what's on the docket? / What do I need to know?"
+        got two answers, the second 11.6 s late; "Yeah, what are all the
+        tasks? Can you expand the tranquility? / Director section so I can see
+        what's." lost its second half."""
+        import director_link
+        prior = self._open_turn
+        if (prior is None or prior.route is None or prior.replying or prior.task.done()
+                or not director_link.director_default()):
+            return None
+        own = director_link.route_default(text, follow_up=True)
+        if own is None or own[0] in {"mute", "call"}:
+            return None     # "stop" is its own turn; a bare call opens a new one
+        if own[0] == "hand" and (prior.route[0] != "hand" or own[1] != prior.route[1]):
+            return None     # names someone else
+        words = (prior.route[-1] + " " + own[-1]).strip()
+        route = prior.route[:-1] + (words,)
+        merged = (prior.text + " " + text).strip()
+        prior.task.cancel()
+        self._open_turn = None
+        logger.info(f"merged late speech into the pending turn: {prior.text[:60]!r} + {text[:60]!r}")
+        return merged, route
+
+    async def _dialogue_turn(self, text, frame, direction, serial=None, route=None):
         from manager import INTENTS, note
         if serial is None:
             self._pause_for_input()
@@ -139,9 +198,12 @@ class DialogueManagerMixin(MemoryManagerMixin):
             called = getattr(self, "_called", None)
             follow_up = (now < getattr(self, "_follow_up_until", 0.0)
                          or bool(called and now - called[1] < director_link.CALL_WINDOW))
-            routed = (director_link.route_default(text, follow_up=follow_up) if default
-                      else director_link.route(text))
-            if default and routed is not None and routed[0] != "call":
+            if route is not None:
+                routed = route      # a merged turn keeps the first part's addressee
+            else:
+                routed = (director_link.route_default(text, follow_up=follow_up) if default
+                          else director_link.route(text))
+            if default and route is None and routed is not None and routed[0] != "call":
                 routed = director_link.answer_call(routed, called, now)
                 self._called = None
             if routed is None and default:
@@ -159,6 +221,9 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 settled = True
                 self._judging = None
                 self._input_ready.set()
+                turn = self._this_turn()
+                if turn is not None and routed[0] in {"ask", "hand"}:
+                    turn.route = routed
                 note("you", text, "understood")
                 self.addressed += 1
                 await emit(self, "addressed", intent="director_" + routed[0], text=text[:120])

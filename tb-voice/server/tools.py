@@ -29,6 +29,11 @@ async def _run(*argv: str, timeout: float = 45.0) -> tuple[int, str]:
     except TimeoutError:
         p.kill()
         return 124, "timed out"
+    except asyncio.CancelledError:
+        # A cancelled call (a superseded ask) must not leave its process running.
+        if p.returncode is None:
+            p.kill()
+        raise
     return p.returncode or 0, out.decode(errors="replace")
 
 

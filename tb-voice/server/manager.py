@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from calls import record
-from dialogue_manager import CURRENT_TURN, DialogueManagerMixin, TurnGuard
+from dialogue_manager import BRIDGING, CURRENT_TURN, DialogueManagerMixin, TurnGuard
 from events import emit
 from exact_speech import ExactSpeakFrame
 from exact_values import EXACT_INTENTS, recorded_value
@@ -395,6 +395,22 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             self._settle_duplicate_input()
             return
         self._pause_for_input()
+        merged = self._merge_late((self._held + " " + text) if self._held is not None else text)
+        if merged is not None:
+            if self._held is not None:
+                if self._held_task:
+                    self._held_task.cancel()
+                self._held = None
+            # Late speech joined the turn whose reply had not started: the
+            # pending ask was cancelled and is re-run with both parts, never
+            # answered twice and never dropped.
+            text, route = merged
+            await emit(self, "dialogue", reason="merged_late_speech", operation="merge",
+                       text=text[:120])
+            if self._recent:
+                self._recent[-1] = text
+            self._schedule_dialogue(text, frame, direction, route=route)
+            return
         # A turn cut mid-sentence (no terminal punctuation) waits up to 1.2 s for
         # its continuation; the two are judged as one. 16:58:32: "…the risks,
         # tradeof" / "uncertainties we're still facing" were judged separately
@@ -426,14 +442,17 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             self._schedule_dialogue(text, frame, direction)
             self._recent.append(text)
 
-    async def _handle_turn(self, text, frame, direction, epoch=None):
+    async def _handle_turn(self, text, frame, direction, epoch=None, route=None):
         # _dialogue_turn restores its ContextVar before errors reach this outer
         # boundary. Keep the input/stage identity, then bind any error speech
         # to the settled epoch instead of emitting an unguarded late answer.
         serial = epoch if epoch is not None else self._input_serial + 1
         stage = (self.stage or {}).get("sessionId")
         try:
-            await self._dialogue_turn(text, frame, direction, epoch)
+            if route is None:
+                await self._dialogue_turn(text, frame, direction, epoch)
+            else:
+                await self._dialogue_turn(text, frame, direction, epoch, route=route)
         except (FleetReadError, FileNotFoundError) as e:
             if serial != self._input_serial or stage != (self.stage or {}).get("sessionId"):
                 return
@@ -622,6 +641,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         await self._input_ready.wait()
         async with self._voice:
             self._require_current()
+            self._reply_starting()
             EXTERNAL_UNTIL["t"] = time.monotonic() + secs
             await emit(self, "answer", session=hand["session"], name=name, text=reply)
             await asyncio.sleep(secs)
@@ -697,8 +717,12 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                 return
             line = director_link.bridge(kind, words, getattr(self, "_last_bridge", None))
             self._last_bridge = line
-            await self._say(line, voice="director" if name == "Director" else "manager",
-                            response_mode="receipt")
+            token = BRIDGING.set(True)
+            try:
+                await self._say(line, voice="director" if name == "Director" else "manager",
+                                response_mode="receipt")
+            finally:
+                BRIDGING.reset(token)
             self._require_current()
 
     async def _relay_hand(self, name: str, words: str, text: str):
@@ -722,9 +746,17 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         await emit(self, "tool", argv=[name, words[:80]], meaning=f"asking {name}")
         asked = time.monotonic()
         ask = asyncio.ensure_future(_run(*argv, timeout=60))
-        if director_link.director_default():
-            await self._bridge_while(ask, name, words, asked)
-        code, out = await ask
+        try:
+            if director_link.director_default():
+                await self._bridge_while(ask, name, words, asked)
+            code, out = await ask
+        except asyncio.CancelledError:
+            # Superseded (late speech joined this turn, or a newer turn): the
+            # ask is stopped, not left to finish unheard.
+            if not ask.done():
+                ask.cancel()
+                logger.info(f"{name} ask superseded before its answer: {words[:60]!r}")
+            raise
         self._require_current()
         reply = director_link.flatten(out) if code == 0 else ""
         if code == 0 and not reply:
@@ -901,6 +933,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             await self._input_ready.wait()
             async with self._voice:
                 self._require_current()
+                self._reply_starting()
                 await emit(self, "speaking", voice=voice, session=session, text=text[:160])
                 guard = self._speech_guard()
                 delivery = self.deliverybook.create(text, current=guard)
