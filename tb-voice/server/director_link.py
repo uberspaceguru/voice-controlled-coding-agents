@@ -169,8 +169,12 @@ def spoken_fixes(text: str) -> str:
 # cue, and the next utterance within this window goes to the one called.
 CALL_WINDOW = 8.0
 # A follow-up ("yes", "the second one") is Director's when it comes within this
-# many seconds of Director finishing a line.
-FOLLOW_UP_SECS = 8.0
+# many seconds of Director finishing a line. 8 s was measured too short on
+# Ahmed's first real conversation (25 Sep 19:40): "I don't remember anything
+# about this project", 15 s after Director spoke, never reached it. Inside the
+# window Director's own gate (Jev, with the conversation as context) decides
+# whether a line was for it and stays silent when it was not.
+FOLLOW_UP_SECS = 45.0
 
 
 # The card's own voice, heard back (25 Sep, real microphone): the mic is muted
