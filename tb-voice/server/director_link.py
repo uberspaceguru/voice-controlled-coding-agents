@@ -35,6 +35,7 @@ voice; it is not the fleet manager and it is not Director. So:
 
 import json
 import os
+import time
 import re
 import shutil
 
@@ -353,6 +354,38 @@ def after_stop(text: str) -> str:
     return rest if re.search(r"[A-Za-z]{2}", rest) else text
 
 
+# Other audio (tb-media-aware, 26 Sep 12:35: a video playing behind him was
+# transcribed onto the card). The app watches which processes play sound and
+# writes media.json in its folder; while another app plays, only a turn that
+# names Director or a right-hand is his. A file older than MEDIA_FRESH_SECS is
+# a dead app's, and means nothing is playing.
+MEDIA_FRESH_SECS = 15.0
+
+
+def media_path() -> str | None:
+    folder = os.getenv("VOICE_DISPATCH_SUPPORT_DIR")
+    return os.path.join(os.path.expanduser(folder), "media.json") if folder else None
+
+
+def media_playing(path: str | None = None, now: float | None = None) -> bool:
+    path = path or media_path()
+    if not path:
+        return False
+    try:
+        with open(path) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    fresh = (now or time.time()) - float(state.get("t") or 0) < MEDIA_FRESH_SECS
+    return bool(state.get("playing")) and fresh
+
+
+def names_someone(text: str, names: list[str] | None = None) -> bool:
+    """The turn opens with Director's name (or a mishearing of it) or a right-hand's."""
+    t = (text or "").strip()
+    return named_director(t) or _named_hand(t, right_hands() if names is None else names) is not None
+
+
 def director_default() -> bool:
     """The host talks to Director by default (the Director app)."""
     return os.getenv("TB_DEFAULT_INTERLOCUTOR", "").strip().lower() == "director"
@@ -386,7 +419,8 @@ def _director_vocative(t: str) -> str | None:
     return None
 
 
-def route_default(text: str, names: list[str] | None = None, follow_up: bool = False) -> tuple[str, ...] | None:
+def route_default(text: str, names: list[str] | None = None, follow_up: bool = False,
+                  name_only: bool = False) -> tuple[str, ...] | None:
     """Director's hands-free, gated (25 Sep, tb-address-gate): a turn is for a
     right-hand only when it opens with a name (a hand's, or Director's, or
     Tranquility's, near names included), or when it is a follow-up (said within
@@ -407,6 +441,8 @@ def route_default(text: str, names: list[str] | None = None, follow_up: bool = F
         return ("ask", rest) if re.search(r"[A-Za-z0-9]", rest) else ("call", "Director")
     # What only Director is for opens a conversation without the name:
     # "what needs me?", "what's ready", "catch me up".
+    if name_only:
+        return None         # other audio is playing: nothing unnamed is his
     if follow_up or _FOR_DIRECTOR.search(t):
         return ("ask", spoken_fixes(t))
     return None

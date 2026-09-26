@@ -185,6 +185,8 @@ class DialogueManagerMixin(MemoryManagerMixin):
         if (prior is None or prior.route is None or prior.replying or prior.task.done()
                 or not director_link.director_default()):
             return None
+        if director_link.media_playing():
+            return None     # other audio: its words never join his turn
         own = director_link.route_default(text, follow_up=True)
         if own is None or own[0] in {"mute", "call"}:
             return None     # "stop" is its own turn; a bare call opens a new one
@@ -273,7 +275,12 @@ class DialogueManagerMixin(MemoryManagerMixin):
             if default:
                 # "Stop. Tell me about the first one.": the stop was acted on over the voice; the rest is the turn
                 text = director_link.after_stop(text)
-            if default and director_link.hearing_check(text):
+            # Another app is playing sound (tb-media-aware): only a turn that names someone is his
+            media = default and director_link.media_playing()
+            named = media and director_link.names_someone(text)
+            if media and not named:
+                self._follow_up_until = 0.0
+            if default and director_link.hearing_check(text) and (not media or named):
                 # "Hello, Director, you there?": code answers at once; no model, no filler, no lookup
                 settled = True
                 self._judging = None
@@ -285,7 +292,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
                 asyncio.ensure_future(self._log_voice_event("hearing_check", text, director_link.HEARING_REPLY))
                 return
-            if default and director_link.dismissal(text):
+            if default and director_link.dismissal(text) and (not media or named):
                 # "All right, just go away.": the exchange is over. Nothing is said, nothing is
                 # asked, anything still playing stops, and only his name opens it again.
                 settled = True
@@ -303,7 +310,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 asyncio.ensure_future(self._log_voice_event("dismissal", text, ""))
                 return
             held = getattr(self, "_held_fragment", None)
-            if default and held and now - held[1] < director_link.HOLD_FRAGMENT_SECS:
+            if default and held and not media and now - held[1] < director_link.HOLD_FRAGMENT_SECS:
                 # the rest of a sentence Director held as unfinished
                 text = f"{held[0]} {text}"
                 self._held_fragment = None
@@ -316,8 +323,11 @@ class DialogueManagerMixin(MemoryManagerMixin):
             if route is not None:
                 routed = route      # a merged turn keeps the first part's addressee
             else:
-                routed = (director_link.route_default(text, follow_up=follow_up) if default
-                          else director_link.route(text))
+                # under other audio the one unnamed line that is his is the one right after "Director."
+                called_now = bool(called and now - called[1] < director_link.CALL_WINDOW)
+                routed = (director_link.route_default(text, follow_up=called_now if media else follow_up,
+                                                      name_only=media and not called_now)
+                          if default else director_link.route(text))
             if default and route is None and routed is not None and routed[0] != "call":
                 routed = director_link.answer_call(routed, called, now)
                 self._called = None
@@ -328,7 +338,7 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 self._judging = None
                 self._input_ready.set()
                 await emit(self, "listening", text=text[:120])
-                note("you", text, "not addressed; ignored")
+                note("you", text, "not addressed; ignored" + (" (other audio playing: name only)" if media else ""))
                 logger.info(f"gate: ignored {text[:80]!r}: no name, and the conversation window "
                             f"{'closed ' + str(round(now - getattr(self, '_follow_up_until', 0.0), 1)) + ' s ago' if getattr(self, '_follow_up_until', 0.0) else 'never opened'}")
                 return

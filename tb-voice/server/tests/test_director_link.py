@@ -544,6 +544,41 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
                    "Stop. Tell me about the first one.", "That's all for the Wispr one, what else?", ""):
             self.assertFalse(d.dismissal(yes := no), no)
 
+    async def test_other_audio_makes_the_gate_name_only(self):
+        # tb-media-aware (26 Sep 12:35): a video behind him ("the progress of human farming…") reached the card
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        run = AsyncMock(return_value=(0, json.dumps({"reply": "Noted."})))
+        self.m._earcon = AsyncMock()
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()), \
+                patch("dialogue_manager.emit", AsyncMock()), patch.object(d, "media_playing", lambda *a, **k: True):
+            await self.m._dialogue_turn("Director, what needs me?", None, None)       # named: his
+            await self.m._dialogue_turn("the progress of human farming changed everything", None, None)
+            await self.m._dialogue_turn("what needs me?", None, None)                  # unnamed, even Director's own
+            await self.m._dialogue_turn("still there?", None, None)                    # an unnamed check
+            self.m._say.reset_mock()
+            await self.m._dialogue_turn("Director, still there?", None, None)
+            self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Yes, I'm here."])
+            await self.m._dialogue_turn("Director.", None, None)
+            await self.m._dialogue_turn("what is ready?", None, None)                  # right after the call: his
+            await asyncio.sleep(0)
+        asked = [c.args[3] for c in run.await_args_list if "ask" in c.args]
+        self.assertEqual(asked, ["what needs me?", "what is ready?"])
+
+    def test_media_state_is_read_fresh_or_not_at_all(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "media.json")
+            self.assertFalse(d.media_playing(path), "no file: nothing playing")
+            with open(path, "w") as fh:
+                json.dump({"playing": True, "t": 1000.0}, fh)
+            self.assertTrue(d.media_playing(path, now=1005.0))
+            self.assertFalse(d.media_playing(path, now=1000.0 + d.MEDIA_FRESH_SECS + 1), "a dead app's file")
+            with open(path, "w") as fh:
+                json.dump({"playing": False, "t": 1000.0}, fh)
+            self.assertFalse(d.media_playing(path, now=1001.0))
+        self.assertIsNone(d.route_default("what needs me?", names=[], name_only=True))
+        self.assertEqual(d.route_default("Director, what needs me?", names=[], name_only=True), ("ask", "what needs me?"))
+
     def test_what_counts_as_a_hearing_check(self):
         for yes in ("Hello?", "Director?", "Hello. Director, you there?", "are you there", "Tranquility, can you hear me?",
                     "hey, you with me?",
