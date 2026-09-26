@@ -692,17 +692,22 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         # speaks, and "yes, run through the rest" repeats Director's question
         # by design.
         first = True
-        for part in director_link.chunks(reply):
-            line = ((f"{name}: " + part) if first and not (live and name == "Director") else part)
-            first = False
-            spoken = (await self._say(line, voice="director", session=hand.get("session"), response_mode="detail")
-                      if name == "Director" else await self._say(line, response_mode="detail"))
-            if spoken is not True:
-                return
-            self._require_current()
-        if live:
-            # The conversation stays open from the real end of the voice.
-            self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
+        try:
+            for part in director_link.chunks(reply):
+                line = ((f"{name}: " + part) if first and not (live and name == "Director") else part)
+                first = False
+                spoken = (await self._say(line, voice="director", session=hand.get("session"), response_mode="detail")
+                          if name == "Director" else await self._say(line, response_mode="detail"))
+                if spoken is not True:
+                    return
+                self._require_current()
+        finally:
+            if live:
+                # The conversation stays open from the end of the voice, however
+                # it ended: a line the transport cut short (VAD "forcing speech
+                # stop", 25 Sep 19:42) still opened a conversation, and making
+                # the window wait for a clean finish lost Ahmed's next lines.
+                self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
 
     async def _director_inventory(self) -> str | None:
         """The fleet as Director sees it (right-hands and counts), or None."""

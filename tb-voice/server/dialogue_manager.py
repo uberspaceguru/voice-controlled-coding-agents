@@ -2,6 +2,8 @@
 
 import asyncio
 import time
+
+from loguru import logger
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
@@ -150,6 +152,8 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 self._input_ready.set()
                 await emit(self, "listening", text=text[:120])
                 note("you", text, "not addressed; ignored")
+                logger.info(f"gate: ignored {text[:80]!r}: no name, and the conversation window "
+                            f"{'closed ' + str(round(now - getattr(self, '_follow_up_until', 0.0), 1)) + ' s ago' if getattr(self, '_follow_up_until', 0.0) else 'never opened'}")
                 return
             if routed is not None:
                 settled = True
