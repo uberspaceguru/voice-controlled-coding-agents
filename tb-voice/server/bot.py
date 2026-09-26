@@ -44,6 +44,7 @@ from speech_delivery import OutputDeliveryObserver
 from tools import SCHEMAS
 from tts import SpokenGradiumTTSService
 from turn_end import ForecastGradiumSTTService, ForecastTurnStopStrategy
+from words_tap import WordsTap
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
@@ -107,6 +108,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             transport.input(),
             EchoGate(),
             stt,
+            WordsTap(gate),
             user_aggregator,
             gate,
             llm,

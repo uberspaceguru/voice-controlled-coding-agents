@@ -638,7 +638,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         # follow-up window after that is Director's without its name.
         import director_link
         self._follow_up_until = time.monotonic() + secs + director_link.FOLLOW_UP_SECS
-        await self._input_ready.wait()
+        await self._floor_ready()
         async with self._voice:
             self._require_current()
             self._reply_starting()
@@ -930,7 +930,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         """
         from exact_speech import DialogueSpeakFrame
         for attempt in range(2 if retry_interrupted else 1):
-            await self._input_ready.wait()
+            await self._floor_ready()
             async with self._voice:
                 self._require_current()
                 self._reply_starting()
@@ -956,7 +956,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                     return True
             if delivery.status != "interrupted" or attempt or not self._current():
                 return False
-            await self._input_ready.wait()
+            await self._floor_ready()
             self._require_current()
         return False
 

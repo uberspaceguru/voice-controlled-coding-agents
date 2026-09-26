@@ -1,4 +1,5 @@
-"""Late speech joins the turn whose reply has not started."""
+"""Late speech joins the turn whose reply has not started; a finished reply is
+never held behind sound that carries no words."""
 
 import asyncio
 import os
@@ -12,8 +13,10 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 import director_link as d
+import dialogue_manager
 import test_director_link  # noqa: F401  (a roster of its own, never the Mac's)
-from test_memory_manager import make_manager
+from manager import Manager
+from test_memory_manager import SpeechEvidence, make_manager
 
 DIRECTOR = {"TB_DEFAULT_INTERLOCUTOR": "director"}
 
@@ -207,6 +210,85 @@ class LateSpeech(unittest.IsolatedAsyncioTestCase):
     async def test_outside_the_director_app_nothing_merges(self):
         with patch.dict(os.environ, {"TB_DEFAULT_INTERLOCUTOR": ""}):
             self.assertIsNone(self.m._merge_late("What do I need to know?"))
+
+
+class Floor(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.patches = ExitStack()
+        self.emit = self.patches.enter_context(patch("dialogue_manager.emit", AsyncMock()))
+        self.patches.enter_context(patch.object(dialogue_manager, "FLOOR_WAIT_SECS", 0.15))
+        self.patches.enter_context(patch.object(dialogue_manager, "HOLD_SECS", 0.3))
+        self.m = make_manager()
+
+    def tearDown(self):
+        self.patches.close()
+
+    def capped(self):
+        return [c for c in self.emit.await_args_list if c.kwargs.get("reason") == "floor_wait_capped"]
+
+    async def timed(self, coro):
+        t0 = time.monotonic()
+        await coro
+        return time.monotonic() - t0
+
+    async def test_hearing_without_words_holds_a_reply_at_most_the_floor_wait(self):
+        # 25 Sep 18:19: a reply was held 27.6 s while VAD heard the room.
+        self.m._pause_for_input()
+        self.m.words_heard("So that first one.")
+        waited = await self.timed(self.m._floor_ready())
+        self.assertGreaterEqual(waited, 0.14)
+        self.assertLess(waited, 0.5)
+        self.assertFalse(self.m._input_ready.is_set(), "the hearing pause itself is untouched")
+        self.assertEqual(len(self.capped()), 1)
+
+    async def test_words_still_coming_keep_the_reply_waiting(self):
+        self.m._pause_for_input()
+
+        async def talking():
+            for _ in range(6):
+                self.m.words_heard("Tell me more about that")
+                await asyncio.sleep(0.05)
+        talk = asyncio.create_task(talking())
+        waited = await self.timed(self.m._floor_ready())
+        await talk
+        self.assertGreaterEqual(waited, 0.25 + 0.14, "waits until his words stop, then the floor wait")
+
+    async def test_words_that_hold_the_floor_wait_longer(self):
+        self.m._pause_for_input()
+        self.m.words_heard("Tell me more about the")
+        waited = await self.timed(self.m._floor_ready())
+        self.assertGreaterEqual(waited, 0.55, "HOLD_SECS + 0.3")
+
+    async def test_a_turn_being_judged_is_always_waited_for(self):
+        self.m._pause_for_input()
+        release = asyncio.Event()
+        self.m._judging = asyncio.create_task(release.wait())
+
+        async def settle():
+            await asyncio.sleep(0.4)
+            release.set()
+            self.m._input_ready.set()
+        asyncio.create_task(settle())
+        waited = await self.timed(self.m._floor_ready())
+        self.assertGreaterEqual(waited, 0.38)
+        self.assertEqual(self.capped(), [])
+
+    async def test_a_settled_input_does_not_wait(self):
+        self.assertLess(await self.timed(self.m._floor_ready()), 0.05)
+
+    async def test_the_rest_of_the_reply_does_not_wait_again(self):
+        self.m._pause_for_input()
+        await self.m._floor_ready()
+        self.assertLess(await self.timed(self.m._floor_ready()), 0.05)
+        self.m._pause_for_input()               # he starts again: a new wait
+        self.assertGreaterEqual(await self.timed(self.m._floor_ready()), 0.14)
+
+    async def test_the_real_say_speaks_over_wordless_hearing(self):
+        SpeechEvidence(self.m)
+        with patch("manager.note"), patch("manager.emit", AsyncMock()):
+            self.m._pause_for_input()
+            self.m.words_heard("So that first one.")
+            self.assertTrue(await asyncio.wait_for(Manager._say(self.m, "It needs the GPU back."), 2.0))
 
 
 if __name__ == "__main__":

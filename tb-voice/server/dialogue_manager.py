@@ -1,6 +1,7 @@
 """Connect the explicit dialogue policy to the manager's existing read/speak doors."""
 
 import asyncio
+import os
 import time
 
 from loguru import logger
@@ -13,6 +14,12 @@ from dialogue_questions import build_questions, judgment_state
 from events import emit
 from exact_values import ExactValue
 from memory_manager import MemoryManagerMixin
+from turn_end import HOLD_SECS, holds_floor
+
+# A finished reply waits for his words, not for sound: with no new words for
+# this long it is spoken, whatever VAD hears (25 Sep 18:19: 27.6 s held behind
+# room sound; research/turn-taking.md R4/R6).
+FLOOR_WAIT_SECS = float(os.getenv("TB_FLOOR_WAIT_SECS", "1.5"))
 
 
 @dataclass
@@ -53,6 +60,9 @@ class DialogueManagerMixin(MemoryManagerMixin):
         self._input_ready.set()
         self._deliveries = set()
         self._open_turn = None
+        self._last_words = 0.0
+        self._last_words_text = ""
+        self._floor_taken = None
 
     def _current(self):
         guard = CURRENT_TURN.get()
@@ -130,7 +140,12 @@ class DialogueManagerMixin(MemoryManagerMixin):
         self._open_turn = OpenTurn(text, self._handler)
         return True
 
-    # -- late speech ----------------------------------------------------------------
+    # -- late speech and the floor --------------------------------------------------
+
+    def words_heard(self, text: str):
+        """A transcript (interim or final) arrived: he is producing words."""
+        self._last_words = time.monotonic()
+        self._last_words_text = text or ""
 
     def _this_turn(self):
         turn = self._open_turn
@@ -168,6 +183,37 @@ class DialogueManagerMixin(MemoryManagerMixin):
         self._open_turn = None
         logger.info(f"merged late speech into the pending turn: {prior.text[:60]!r} + {text[:60]!r}")
         return merged, route
+
+    async def _floor_ready(self):
+        """Wait until his input is settled, but never hold a finished reply
+        behind sound that carries no words: after FLOOR_WAIT_SECS with no new
+        transcript (longer when his last words hold the floor), speak. A
+        classifier or a held fragment still in flight is always waited for."""
+        if self._input_ready.is_set() or self._floor_taken == self._input_serial:
+            return
+        start = time.monotonic()
+        while not self._input_ready.is_set():
+            now = time.monotonic()
+            judging = (getattr(self, "_held", None) is not None
+                       or (self._judging is not None and not self._judging.done()))
+            needed = (max(FLOOR_WAIT_SECS, HOLD_SECS + 0.3) if holds_floor(self._last_words_text)
+                      else FLOOR_WAIT_SECS)
+            quiet = now - max(start, self._last_words)
+            if not judging and quiet >= needed:
+                self._floor_taken = self._input_serial
+                logger.info(f"floor: reply waited {now - start:.1f} s behind hearing with no new "
+                            f"words for {quiet:.1f} s; speaking")
+                await emit(self, "dialogue", reason="floor_wait_capped", operation="speak",
+                           ms=round((now - start) * 1000), quiet_ms=round(quiet * 1000))
+                return
+            wait = 0.1 if judging else max(0.05, needed - quiet)
+            try:
+                await asyncio.wait_for(self._input_ready.wait(), timeout=wait)
+            except asyncio.TimeoutError:
+                pass
+        waited = time.monotonic() - start
+        if waited >= 0.05:
+            logger.info(f"floor: reply waited {waited:.1f} s for his turn to settle")
 
     async def _dialogue_turn(self, text, frame, direction, serial=None, route=None):
         from manager import INTENTS, note

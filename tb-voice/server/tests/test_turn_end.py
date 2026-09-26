@@ -10,6 +10,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 import turn_end
 from turn_end import (
@@ -19,6 +20,7 @@ from turn_end import (
     decide,
     holds_floor,
 )
+from words_tap import WordsTap
 
 
 class Clock:
@@ -260,6 +262,26 @@ class Transcriber(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stt.forecast.prob, 0.7)
         stt._handle_text.assert_awaited_once_with("hello")
         stt._handle_flushed.assert_awaited_once()
+
+
+class Tap(unittest.IsolatedAsyncioTestCase):
+    async def test_words_reach_the_manager_and_every_frame_passes(self):
+        heard = []
+
+        class M:
+            def words_heard(self, text):
+                heard.append(text)
+
+        tap = WordsTap(M())
+        tap.push_frame = AsyncMock()
+        frames = [InterimTranscriptionFrame("So what's", "ahmed", "now"),
+                  TranscriptionFrame("So what's on the docket?", "ahmed", "now"),
+                  TranscriptionFrame("  ", "ahmed", "now"), VADUserStartedSpeakingFrame()]
+        with patch.object(FrameProcessor, "process_frame", AsyncMock()):
+            for f in frames:
+                await tap.process_frame(f, FrameDirection.DOWNSTREAM)
+        self.assertEqual(heard, ["So what's", "So what's on the docket?"])
+        self.assertEqual([c.args[0] for c in tap.push_frame.await_args_list], frames)
 
 
 if __name__ == "__main__":
