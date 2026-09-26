@@ -178,6 +178,16 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class CardPayload(unittest.TestCase):
+    def test_only_the_four_kinds_reach_the_card(self):
+        item = {"kind": "item", "title": "desktop refresh", "question": "Run this?", "reply": "approve"}
+        self.assertEqual(json.loads(d.card_payload({"card_json": item})), item)
+        self.assertEqual(json.loads(d.card_payload({"card_json": json.dumps(item)})), item, "a string is parsed")
+        for flags in ({}, {"card": "the sentence"}, {"card_json": {"kind": "none"}}, {"card_json": "not json"},
+                      {"card_json": {"kind": "chart"}}, {"card_json": [1]}, None):
+            self.assertEqual(d.card_payload(flags), "", flags)
+
+
 class Wiring(unittest.IsolatedAsyncioTestCase):
     """The manager's half: Director's turn skips the judgment, its answer is
     spoken as it came back, and the fleet is Director's."""
@@ -286,6 +296,29 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
                          "the live voice speaks for itself; nothing is handed to the card")
         self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Director didn't answer just now."],
                          "once a minute, in the one voice")
+
+    async def test_every_director_turn_hands_the_card_its_payload_before_the_voice(self):
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        listing = {"kind": "list", "rows": [{"n": 1, "project": "YobiWispr", "title": "run this?", "age": "3 h",
+                                              "agent": "w-a20"}]}
+        run = AsyncMock(side_effect=[
+            (0, json.dumps({"reply": "One thing: YobiWispr wants a yes.", "card": "One thing", "card_json": listing})),
+            (0, json.dumps({"reply": "Okay.", "card_json": {"kind": "none"}})),
+            (0, json.dumps({"reply": "", "card_json": listing})),
+        ])
+        order = []
+        emit = AsyncMock(side_effect=lambda _p, event, **kw: order.append((event, kw.get("card"))))
+        self.m._say = AsyncMock(side_effect=lambda line, **kw: order.append(("say", line)) or True)
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", emit):
+            await self.m._dialogue_turn("what needs me?", None, None)
+            await self.m._dialogue_turn("thanks", None, None)
+            await self.m._dialogue_turn("and the room talks", None, None)
+        shown = [o for o in order if o[0] in ("card", "say")]
+        self.assertEqual(shown, [("card", json.dumps(listing, separators=(",", ":"))),
+                                 ("say", "One thing: YobiWispr wants a yes."),
+                                 ("card", ""), ("say", "Okay.")],
+                         "the payload goes up first, the next turn replaces it, silence changes nothing")
 
     async def test_the_live_voice_speaks_director_and_keeps_the_conversation_open(self):
         from unittest.mock import AsyncMock, patch

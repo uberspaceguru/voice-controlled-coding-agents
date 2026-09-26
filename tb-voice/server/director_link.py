@@ -435,6 +435,25 @@ def director_reply(out: str) -> tuple[str, dict]:
     return out, {}
 
 
+CARD_KINDS = ("list", "item", "action", "screen")
+
+
+def card_payload(flags: dict) -> str:
+    """What Director's card shows with this turn (M26), as the JSON string the
+    app's `card` event carries: Director's `card_json` (an object, or that
+    object as a string) when it is one of list, item, action or screen, else
+    "" so the card drops the last one. Its `card` key is the sentence, not this."""
+    raw = (flags or {}).get("card_json")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return ""
+    if not isinstance(raw, dict) or raw.get("kind") not in CARD_KINDS:
+        return ""
+    return json.dumps(raw, separators=(",", ":"))
+
+
 def flatten(reply: str) -> str:
     """Director's reply as one spoken line: its own words in its own order,
     newlines and list numbers turned into sentence breaks. Nothing reworded."""

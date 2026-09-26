@@ -804,6 +804,11 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             await self._hand_failed(hand, name, asked)
             return
         note(name, reply, "spoken")
+        if name == "Director":
+            # The card's payload (M26): what the sentence is about, drawn under
+            # it while it plays, and replaced (or cleared) by the next turn.
+            await emit(self, "card", session=hand.get("session"), name=name,
+                       card=director_link.card_payload(flags))
         live = director_link.director_default()
         if director_link.cards_host() and not live:
             await self._answer_on_card(hand, name, reply)
