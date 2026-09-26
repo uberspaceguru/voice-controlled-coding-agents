@@ -201,19 +201,34 @@ def is_echo(text: str, last_answer: str | None, age: float) -> bool:
 # ~700 ms is heard as trouble; a 2025 study: a spoken filler eased 4-6.5 s waits,
 # a sound or icon did nothing). Ahmed's first session had 3-5 s of unannounced
 # silence per turn and "are you there?" four times in four minutes.
-SHORT_BRIDGE_AFTER = 0.7     # s from the ask: a one-syllable token keeps the floor
-LONG_BRIDGE_AFTER = 3.0      # s: say what it is doing, tied to his words
-_SHORT = ("Mm.", "So,", "Right,", "Well,")
+# Revised from the research (research/grounding-memory.md, 25 Sep): a bare "Mm."
+# or "um" is an anti-pattern; only a filler tied to the request helped
+# (Boukaram 2021; Liu, Guo & Mousas 2026), and repeating "please wait" made a
+# wait feel longer (Lopez Gambino 2018). Nothing under ~1.2 s; then his request
+# said back in a few words; then where Director is looking; never twice.
+SHORT_BRIDGE_AFTER = 1.2     # s from the ask: say back what he asked
+LONG_BRIDGE_AFTER = 3.5      # s: say where it is looking
 _TOPIC = re.compile(r"(?i)\b(the\s+[\w-]+(?:\s+[\w-]+)?\s+one)\b")
+_ECHO = [
+    (re.compile(r"(?i)\b(what needs me|need(s)? (my|your) attention|anything for me|what's (up|going on)|status|overview)\b"),
+     "What needs you. One sec."),
+    (re.compile(r"(?i)\b(what's|what is|anything) ready\b"), "What's ready. One sec."),
+    (re.compile(r"(?i)\b(done yet|is (it|that) done|waiting on)\b"), "Checking on that. One sec."),
+]
 
 
 def bridge(kind: str, words: str, last: str | None = None) -> str:
-    """The delay token: never the same line twice in a row; the long one names
-    what Director is looking at when he named it ("the GPU one")."""
-    if kind == "short":
-        return next(t for t in _SHORT if t != last)
+    """What Director says while the answer is on its way: his own request, said
+    back ("The GPU one. One sec."), then where it is looking; never the same
+    line twice in a row, never a bare filler."""
     m = _TOPIC.search(words or "")
-    options = ([f"Let me look at {m.group(1)}."] if m else []) + ["Let me look into that.", "One moment, checking."]
+    if kind == "short":
+        options = ([f"{m.group(1)[:1].upper()}{m.group(1)[1:]}. One sec."] if m else [])
+        options += [line for pattern, line in _ECHO if pattern.search(words or "")]
+        options += ["Give me a second on that.", "Let me check that."]
+    else:
+        options = ([f"Looking at {m.group(1)} now."] if m else []) + ["Still checking; nearly there.",
+                                                                   "Looking into it now."]
     return next(t for t in options if t != last)
 
 

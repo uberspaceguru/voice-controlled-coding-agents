@@ -306,8 +306,8 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
                 patch.object(d, "SHORT_BRIDGE_AFTER", 0.05), patch.object(d, "LONG_BRIDGE_AFTER", 0.15):
             await self.m._dialogue_turn("Director, tell me more about the GPU one", None, None)
         said = [c.args[0] for c in self.m._say.await_args_list]
-        self.assertEqual(said[0], "Mm.")
-        self.assertEqual(said[1], "Let me look at the GPU one.")
+        self.assertEqual(said[0], "The GPU one. One sec.")
+        self.assertEqual(said[1], "Looking at the GPU one now.")
         self.assertEqual(said[-1], "Eleven things need you.")
 
     async def test_a_quick_answer_has_no_token(self):
@@ -318,10 +318,13 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             await self.m._dialogue_turn("Director, can you hear me?", None, None)
         self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Yes, I hear you."])
 
-    def test_tokens_never_repeat_back_to_back(self):
-        self.assertNotEqual(d.bridge("short", "", "Mm."), "Mm.")
-        self.assertEqual(d.bridge("long", "what about the TeamChat desktop one?"), "Let me look at the TeamChat desktop one.")
-        self.assertNotEqual(d.bridge("long", "anything", "Let me look into that."), "Let me look into that.")
+    def test_tokens_say_his_request_back_and_never_repeat(self):
+        self.assertEqual(d.bridge("short", "what needs me?"), "What needs you. One sec.")
+        self.assertEqual(d.bridge("short", "what about the TeamChat desktop one?"), "The TeamChat desktop one. One sec.")
+        self.assertEqual(d.bridge("long", "what about the TeamChat desktop one?"), "Looking at the TeamChat desktop one now.")
+        self.assertNotEqual(d.bridge("short", "hm", "Give me a second on that."), "Give me a second on that.")
+        for kind in ("short", "long"):
+            self.assertNotIn(d.bridge(kind, "anything at all"), ("Mm.", "Um.", "Uh."), "never a bare filler")
 
     async def test_a_finished_lookup_is_announced_at_a_pause_while_the_conversation_is_open(self):
         import json as _json
