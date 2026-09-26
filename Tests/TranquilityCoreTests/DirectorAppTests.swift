@@ -43,7 +43,7 @@ final class DirectorAppTests: XCTestCase {
         XCTAssertEqual(s, DeepLink.Summons(to: "director", text: "what is ready",
                                            app: "com.mitchellh.ghostty", pane: "fleet/%8"))
         XCTAssertEqual(RightHands.summonsArgv(s, thread: "ac03daf5"),
-                       ["director", "ask", "what is ready", "--channel", "summons", "--external-id", "ac03daf5",
+                       ["director", "--json", "ask", "what is ready", "--channel", "summons", "--external-id", "ac03daf5",
                         "--context", #"{"app":"com.mitchellh.ghostty","pane":"fleet\/%8"}"#])
         if case .summon = DeepLink.parse(URL(string: "tbdirector://summon?to=yobi1")!) {
             XCTFail("a summons with no words is not one")
@@ -74,7 +74,7 @@ final class DirectorAppTests: XCTestCase {
             XCTAssertFalse(s.test, url)
         }
         XCTAssertNotEqual(RightHands.testThread("ac03daf5"), "ac03daf5")
-        XCTAssertEqual(RightHands.summonsArgv(t, thread: RightHands.testThread("ac03daf5"))[6], "ac03daf5:test")
+        XCTAssertEqual(RightHands.summonsArgv(t, thread: RightHands.testThread("ac03daf5"))[7], "ac03daf5:test")
         XCTAssertEqual(RightHands.testSummonsPlacard, "TEST SUMMONS")
     }
 

@@ -155,6 +155,17 @@ extension StatusHUD {
                                  placard: "\(StateLegend.Glyph.speaking) DIRECTOR")
             highlight(upTo: spoken.text.count)
 
+        case "director-card-payload":
+            // tb-card-fixes (26 Sep): a summoned or tapped Director turn with hands-free off:
+            // Director's own card, its sentence, and the turn's payload under it.
+            let director = "ac03daf5-bd0a-42a7-91b2-fe789e3f8a1a"
+            setCardPayload(CardPayload.parse(json: Self.payloadPoses["handsfree-conversation-list"]), session: director)
+            let line = "You've got 25 things finished. Top ones: YobiWispr's accuracy pass is ready to try."
+            let spoken = SpokenTextSanitizer().sanitize(line, allowing: ["Director", "YobiWispr"])
+            _ = showAnnouncement(spoken: spoken, sessionId: director, pid: nil, project: "Director", cwd: nil,
+                                 eventId: director, placard: "\(StateLegend.Glyph.speaking) DIRECTOR")
+            highlight(upTo: spoken.text.count)
+
         case "right-hands-handsfree":
             // tb-handsfree-ui (25 Sep): hands-free on, the four rows kept with
             // their dots, upstream's orb and its line above STOP HANDS-FREE.

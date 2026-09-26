@@ -2565,6 +2565,9 @@ final class StatusHUD: NSObject {
             if conversationCard && managerOn {
                 rebuildConversationRows()
                 waitingRows.isHidden = false
+            }
+            if cardPayload != nil && ((conversationCard && managerOn)
+                                      || (cardPayloadSession != nil && cardPayloadSession == currentTarget?.sessionId)) {
                 showCardPayload()
             }
 
@@ -3422,10 +3425,15 @@ final class StatusHUD: NSObject {
     /// never on a render (a rebuild under the pointer would eat a press).
     private var builtCardPayload: CardPayload?
 
-    func setCardPayload(_ payload: CardPayload?) {
-        guard payload != cardPayload else { return }
+    /// Whose card the payload belongs to: drawn on that card whichever way it
+    /// was asked (a summons, a tap), and on the conversation card (tb-card-fixes).
+    private(set) var cardPayloadSession: String?
+
+    func setCardPayload(_ payload: CardPayload?, session: String? = nil) {
+        guard payload != cardPayload || session != cardPayloadSession else { return }
         cardPayload = payload
-        if conversationCard { render() }
+        cardPayloadSession = session
+        if conversationCard || (session != nil && session == currentTarget?.sessionId) { render() }
     }
 
     private func showCardPayload() {

@@ -50,6 +50,32 @@ final class RightHandsBrainTests: XCTestCase {
                        "the words are one argv element and never reach a shell")
     }
 
+    /// tb-card-fixes (26 Sep, Codex's acceptance run): a tapped or summoned Director turn carried no payload.
+    func testDirectorIsAskedForJSONAndItsPayloadComesBack() {
+        let hand = RightHands.Hand(name: "Director", ask: ["director", "ask", "{text}", "--channel", "tranquility",
+                                                           "--external-id", "{conversation}"])
+        var ran: [[String]] = []
+        let out = #"{"reply":"You've got 25 things finished.","card_json":{"kind":"list","rows":[{"title":"t"}]},"close":false}"#
+        let r = RightHands.askFull(hand, text: "what is ready", conversation: "ac03", session: "ac03") { _, args, _ in
+            ran.append(args); return .success(out)
+        }
+        XCTAssertEqual(ran.first?.prefix(2), ["--json", "ask"])
+        let answer = try? r.get()
+        XCTAssertEqual(answer?.line, "You've got 25 things finished.")
+        XCTAssertNotNil(CardPayload.parse(json: answer?.card), "the list reaches the card")
+        let silent = RightHands.directorAnswer(#"{"reply":"","close":true,"card_json":{"kind":"none"}}"#)
+        XCTAssertEqual(silent.line, "")
+        XCTAssertTrue(silent.close)
+        XCTAssertNil(CardPayload.parse(json: silent.card))
+        XCTAssertEqual(RightHands.directorAnswer("plain words").line, "plain words", "an older director still works")
+        XCTAssertEqual(RightHands.ask(hand, text: "x", conversation: "c", session: "s") { _, _, _ in .success(#"{"reply":"hi"}"#) },
+                       .success("hi"), "ask() still returns the line")
+        let yobi = RightHands.Hand(name: "Yobi1", ask: ["/usr/bin/python3", "yobi1-ask", "{text}"])
+        _ = RightHands.askFull(yobi, text: "x", conversation: "c", session: "s") { _, args, _ in
+            XCTAssertFalse(args.contains("--json"), "only director is asked for JSON"); return .success("ok")
+        }
+    }
+
     func testAskRunsTheTemplateAndTrimsTheAnswer() {
         let hand = RightHands.Hand(name: "Director", ask: ["/bin/echo", "heard:", "{text}"])
         XCTAssertEqual(RightHands.ask(hand, text: "what needs me?", conversation: "c", session: director),

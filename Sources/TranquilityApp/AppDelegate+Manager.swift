@@ -96,10 +96,7 @@ extension AppDelegate {
     func noteConversation(_ sentence: String?, newTurn: Bool = false) {
         guard managerIsOn, let hands = RightHands.current(),
               let director = hands.order.first(where: { hands.names[$0] == "Director" }) else { return }
-        conversationIdle?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.endConversationCard() }
-        conversationIdle = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.conversationIdleSecs, execute: work)
+        armConversationIdle()
         // Already up: a quiet keeps the last sentence; his next turn clears it
         // (tb-card-text: the stale reply stayed while the talk moved on).
         if sentence == nil && hud.conversationCard && !newTurn { return }
@@ -118,6 +115,23 @@ extension AppDelegate {
     }
 
     static let conversationIdleSecs: TimeInterval = 60
+
+    /// The list comes back after this long with no turn and no voice.
+    func armConversationIdle() {
+        conversationIdle?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.endConversationCard() }
+        conversationIdle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.conversationIdleSecs, execute: work)
+    }
+
+    /// His words for this turn, under the orb, when they came some other way
+    /// than the microphone (a summons, a tap): they are his, so they are shown.
+    func showHeard(_ text: String) {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty else { return }
+        heardFinals = [words]; heardInterim = ""; heardFresh = false; heardShown = true
+        hud.setManagerState(StatusHUD.orbState, line: orbLine("listening"))
+    }
 
     /// A transcript piece from the microphone. His first words after
     /// Director spoke start a new line; interim pieces replace each other.
@@ -1025,7 +1039,7 @@ extension AppDelegate {
             // Every Director turn sends one; an empty one clears the last.
             let payload = CardPayload.parse(json: e.card)
             Permissions.log("hands-free: card payload \(payload.map { "\($0)".prefix(24).description } ?? "none")")
-            hud.setCardPayload(payload)
+            hud.setCardPayload(payload, session: e.session)
         case .ask:
             // "Yobi1, what's on today?" (25 Sep): the hand's brain answers and
             // the answer is spoken on the hand's own card, as a tapped reply is.

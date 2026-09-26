@@ -388,15 +388,63 @@ public enum RightHands {
                            run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
                                Subprocess.run($0, $1, timeout: $2)
                            }) -> Result<String, AskFailure> {
+        askFull(hand, text: text, conversation: conversation, session: session, timeout: timeout, run: run)
+            .flatMap { $0.line.isEmpty ? .failure(.failed("\(hand.ask?.first ?? "the hand") answered nothing"))
+                                       : .success($0.line) }
+    }
+
+    /// What a hand answered: its line, and from Director its card payload (M26
+    /// `card_json`, as a JSON string) and whether he closed the exchange. An
+    /// empty line from Director is its choice of silence, not a failure.
+    public struct Answer: Equatable, Sendable {
+        public var line: String
+        public var card: String?
+        public var close: Bool
+        public init(line: String, card: String? = nil, close: Bool = false) {
+            self.line = line; self.card = card; self.close = close
+        }
+    }
+
+    /// `director ask` is asked with `--json` (tb-card-fixes, 26 Sep: the card's
+    /// payload never reached a tapped or summoned turn, because the plain
+    /// answer carries only the sentence).
+    public static func isDirector(_ argv: [String]) -> Bool {
+        (argv.first.map { ($0 as NSString).lastPathComponent } == "director") && argv.contains("ask")
+    }
+
+    static func withJSON(_ argv: [String]) -> [String] {
+        guard isDirector(argv), !argv.contains("--json") else { return argv }
+        return [argv[0], "--json"] + argv.dropFirst()
+    }
+
+    /// Director's `--json` answer, or its plain text taken as the line.
+    public static func directorAnswer(_ out: String) -> Answer {
+        let text = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+              obj["reply"] != nil else { return Answer(line: text) }
+        var card: String?
+        if let raw = obj["card_json"], !(raw is NSNull) {
+            if let s = raw as? String { card = s }
+            else if let d = try? JSONSerialization.data(withJSONObject: raw) { card = String(decoding: d, as: UTF8.self) }
+        }
+        let line = ((obj["reply"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return Answer(line: line, card: card, close: obj["close"] as? Bool ?? false)
+    }
+
+    public static func askFull(_ hand: Hand, text: String, conversation: String, session: String,
+                               timeout: TimeInterval = 60,
+                               run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
+                                   Subprocess.run($0, $1, timeout: $2)
+                               }) -> Result<Answer, AskFailure> {
         guard let template = hand.ask, !template.isEmpty else { return .failure(.notABrain) }
-        let argv = fill(template, text: text, conversation: conversation, session: session)
+        let argv = withJSON(fill(template, text: text, conversation: conversation, session: session))
         guard let program = executable(argv[0]) else {
             return .failure(.failed("\(argv[0]) is not on this Mac"))
         }
         switch run(program, Array(argv.dropFirst()), timeout) {
         case .success(let out):
-            let line = out.trimmingCharacters(in: .whitespacesAndNewlines)
-            return line.isEmpty ? .failure(.failed("\(argv[0]) answered nothing")) : .success(line)
+            if isDirector(argv) { return .success(directorAnswer(out)) }
+            return .success(Answer(line: out.trimmingCharacters(in: .whitespacesAndNewlines)))
         case .failure(let error):
             return .failure(.failed(error.message.isEmpty ? "\(argv[0]) failed" : error.message))
         }
@@ -409,7 +457,7 @@ public enum RightHands {
             .compactMapValues { $0 }
         let json = (try? JSONSerialization.data(withJSONObject: context, options: [.sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        return ["director", "ask", s.text, "--channel", "summons", "--external-id", thread, "--context", json]
+        return ["director", "--json", "ask", s.text, "--channel", "summons", "--external-id", thread, "--context", json]
     }
 
     /// Run a summons; the line Director answers with (empty when it chose
@@ -417,11 +465,11 @@ public enum RightHands {
     public static func summon(_ s: DeepLink.Summons, thread: String, timeout: TimeInterval = 60,
                               run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
                                   Subprocess.run($0, $1, timeout: $2)
-                              }) -> Result<String, AskFailure> {
+                              }) -> Result<Answer, AskFailure> {
         let argv = summonsArgv(s, thread: thread)
         guard let program = executable(argv[0]) else { return .failure(.failed("director is not on this Mac")) }
         switch run(program, Array(argv.dropFirst()), timeout) {
-        case .success(let out): return .success(out.trimmingCharacters(in: .whitespacesAndNewlines))
+        case .success(let out): return .success(directorAnswer(out))
         case .failure(let error): return .failure(.failed(error.message.isEmpty ? "director failed" : error.message))
         }
     }

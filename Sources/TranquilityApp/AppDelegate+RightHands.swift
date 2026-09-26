@@ -229,13 +229,26 @@ extension AppDelegate {
                              fallback: String?) {
         Permissions.log("right-hands: asking \(name): \(text.prefix(80))")
         let working = hud.showCardWorking(for: id, "\(StateLegend.Glyph.quiet) ASKING \(name.uppercased())…")
+        let director = RightHands.isDirector(hand.ask ?? [])
+        if director { showHeardIfHandsFree(text) }
         Task.detached(priority: .userInitiated) { [weak self] in
-            let result = RightHands.ask(hand, text: text, conversation: id, session: id)
+            let result = RightHands.askFull(hand, text: text, conversation: id, session: id)
             await MainActor.run { [weak self] in
                 if let working { self?.hud.endCardWorking(working) }
                 defer { self?.finishBrainAsk(id) }
                 switch result {
-                case .success(let line): self?.speakOnCard(line, as: id, name: name)
+                case .success(let answer) where director:
+                    if answer.line.isEmpty, !answer.close, let fallback {
+                        self?.speakOnCard(fallback, as: id, name: name)     // More's own line, as before
+                    } else {
+                        self?.presentDirectorTurn(answer, as: id)
+                    }
+                case .success(let answer) where !answer.line.isEmpty:
+                    self?.speakOnCard(answer.line, as: id, name: name)
+                case .success:
+                    Permissions.log("right-hands: \(name) answered nothing")
+                    if let fallback { self?.speakOnCard(fallback, as: id, name: name) }
+                    else { self?.hud.showResult("\(name) didn't answer just now.") }
                 case .failure(let why):
                     Permissions.log("right-hands: \(name) did not answer: \(why)")
                     if let fallback { self?.speakOnCard(fallback, as: id, name: name) }
@@ -243,6 +256,34 @@ extension AppDelegate {
                 }
             }
         }
+    }
+
+    /// One Director turn on its card, whatever asked it: a summons, a tap, More
+    /// (tb-card-fixes, 26 Sep, Codex's acceptance run). The payload goes on
+    /// Director's card; with hands-free on it is the conversation card, his
+    /// words under the orb; a silent turn never leaves "Asking…" up, and a
+    /// closing one goes back to the list at once.
+    func presentDirectorTurn(_ answer: RightHands.Answer, as id: String) {
+        hud.setCardPayload(CardPayload.parse(json: answer.card), session: id)
+        guard !answer.line.isEmpty else {
+            Permissions.log("right-hands: Director chose silence\(answer.close ? "; the exchange is closed" : "")")
+            if answer.close || !hud.conversationCard {
+                endConversationCard()
+                showIdleGrid()
+            } else {
+                armConversationIdle()          // the card goes back to the list after a quiet minute
+            }
+            return
+        }
+        if managerIsOn {
+            hud.conversationCard = true
+            armConversationIdle()
+        }
+        speakOnCard(answer.line, as: id, name: "Director", force: true)
+    }
+
+    private func showHeardIfHandsFree(_ text: String) {
+        if managerIsOn { showHeard(text) }
     }
 
     /// The ask in flight for this hand has answered: release it, or ask the
@@ -319,18 +360,22 @@ extension AppDelegate {
         // Director when it is free, so a ⌃⌃ while it is answered asks nothing.
         let claimed = RightHands.BrainAsks.shared.begin(director) == .go
         if !claimed { Permissions.log("summons: Director is already answering; asked anyway") }
-        hud.showResult("Asking Director…")
+        if managerIsOn {
+            // His words under the orb, Director's card up while it thinks (tb-card-fixes)
+            showHeard(s.text)
+            noteConversation("\u{2026}")
+        } else {
+            hud.showResult("Asking Director…")
+        }
         Task.detached(priority: .userInitiated) { [weak self] in
             let result = RightHands.summon(s, thread: thread)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if claimed { self.finishBrainAsk(director) }
                 switch result {
-                case .success(let line) where !line.isEmpty:
-                    Permissions.log("summons: Director answered: \(line.prefix(120))")
-                    self.speakOnCard(line, as: director, name: "Director", force: true)
-                case .success:
-                    Permissions.log("summons: Director chose silence")
+                case .success(let answer):
+                    Permissions.log("summons: Director answered: \(answer.line.isEmpty ? "(silence)" : String(answer.line.prefix(120)))")
+                    self.presentDirectorTurn(answer, as: director)
                 case .failure(let why):
                     Permissions.log("summons: Director did not answer: \(why)")
                     self.hud.showResult("Director didn't answer just now.")
@@ -360,7 +405,7 @@ extension AppDelegate {
         }
         let thread = RightHands.testThread(hands.hands[hand]?.session ?? hand)
         Task.detached(priority: .utility) { [weak self] in
-            let result = RightHands.summon(s, thread: thread)
+            let result = RightHands.summon(s, thread: thread).map(\.line)
             await MainActor.run { [weak self] in
                 switch result {
                 case .success(let line) where !line.isEmpty:
