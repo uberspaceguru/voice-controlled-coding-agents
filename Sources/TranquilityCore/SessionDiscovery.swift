@@ -884,9 +884,10 @@ public enum SessionDiscovery {
         var result = Result()
         let fm = FileManager.default
         guard let walker = fm.enumerator(
-            at: sessions, includingPropertiesForKeys: [.contentModificationDateKey],
+            at: sessions, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
             options: [.skipsHiddenFiles])
         else { return result }
+        var seen = Set<String>()
 
         // One read for the whole walk. Codex keeps its own short summary per
         // thread (see `CodexThreadNames`), which is what makes a Codex row wear
@@ -895,15 +896,19 @@ public enum SessionDiscovery {
 
         var kept: [Session] = []
         for case let url as URL in walker where url.pathExtension == "jsonl" {
-            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate ?? .distantPast
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let modified = values?.contentModificationDate ?? .distantPast
             guard now.timeIntervalSince(modified) <= window else { continue }
             result.scanned += 1
+            seen.insert(url.path)
 
-            guard let text = try? String(contentsOfFile: url.path, encoding: .utf8)
-            else { continue }
-            let parsed = autoreleasepool { CodexRollout.parse(text) }
-            guard let sessionId = parsed.meta?.sessionId else {
+            // The file's first line and its last 256 KB, once per change of the file
+            // (tb-media-aware-2, 26 Sep: re-parsing 2.8 GB of rollouts every 30 s held
+            // a core at 65-72% with the app idle).
+            guard let digest = codexDigests.digest(url, modified: modified, size: values?.fileSize ?? -1) else {
+                continue
+            }
+            guard let sessionId = digest.sessionId else {
                 result.unclassifiable += 1
                 continue
             }
@@ -913,7 +918,7 @@ public enum SessionDiscovery {
             // file's own word for itself rather than on a guess, and only on
             // a POSITIVE `subagent`: a rollout written before the field
             // existed predates multi-agent v2 and is a session.
-            if parsed.meta?.isSubagent == true {
+            if digest.isSubagent {
                 result.subagents += 1
                 continue
             }
@@ -922,21 +927,22 @@ public enum SessionDiscovery {
             // yet — a real, known gap, not a design choice — so file mtime
             // is the only clock there is: the same fallback Claude Code's
             // own `lastMoved` uses when a tail holds nothing dated.
-            let landable = landingDirectory(for: parsed.meta?.cwd, fm) != nil
+            let landable = landingDirectory(for: digest.cwd, fm) != nil
 
             kept.append(Session(
                 sessionId: sessionId,
-                cwd: parsed.meta?.cwd,
+                cwd: digest.cwd,
                 transcriptPath: url.path,
                 title: names[sessionId.lowercased()],
                 lastActivityAt: modified,
-                answered: parsed.messages.last?.role == "user",
+                answered: digest.lastRole == "user",
                 activity: nil,       // no SessionActivity-equivalent classifier for Codex yet
                 liveness: .unknown,
                 revivable: landable,
                 harness: CodexAdapter().id))
         }
 
+        codexDigests.keep(only: seen)
         kept.sort { $0.lastActivityAt > $1.lastActivityAt }
         if kept.count > limit {
             result.beyondLimit = kept.count - limit
@@ -948,4 +954,75 @@ public enum SessionDiscovery {
         // for themselves, per row, in `join`.
         return result
     }
+}
+
+/// What the Codex walk needs from one rollout (its identity from the first
+/// record, whose turn it is from the last message), kept per file until the
+/// file changes. Rollouts run to tens of megabytes and only grow at the end.
+final class CodexDigestCache: @unchecked Sendable {
+    struct Digest: Equatable {
+        var modified: Date
+        var size: Int
+        var sessionId: String?
+        var cwd: String?
+        var isSubagent: Bool
+        var lastRole: String?
+    }
+
+    static let headMost = 4 << 20        // a session_meta line can carry long instructions
+    static let tailBytes = 256 << 10
+
+    private let lock = NSLock()
+    private var held: [String: Digest] = [:]
+    private(set) var reads = 0           // for tests: how many files were actually opened
+
+    func digest(_ url: URL, modified: Date, size: Int) -> Digest? {
+        lock.lock()
+        let before = held[url.path]
+        lock.unlock()
+        if let d = before, d.modified == modified, d.size == size { return d }
+        guard let fresh = Self.read(url, modified: modified, size: size, before: before) else { return nil }
+        lock.lock(); held[url.path] = fresh; reads += 1; lock.unlock()
+        return fresh
+    }
+
+    func keep(only paths: Set<String>) {
+        lock.lock(); held = held.filter { paths.contains($0.key) }; lock.unlock()
+    }
+
+    static func read(_ url: URL, modified: Date, size: Int, before: Digest? = nil) -> Digest? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        // The head: up to the first newline.
+        var head = Data()
+        while head.count < headMost, let chunk = try? handle.read(upToCount: 64 << 10), !chunk.isEmpty {
+            if let nl = chunk.firstIndex(of: 0x0A) { head.append(chunk[..<nl]); break }
+            head.append(chunk)
+        }
+        let meta = autoreleasepool { CodexRollout.parse(String(decoding: head, as: UTF8.self)).meta }
+        // The tail: the last message's role. A partial first line is skipped by the parser.
+        var lastRole: String?
+        if size > tailBytes, (try? handle.seek(toOffset: UInt64(size - tailBytes))) != nil,
+           let tail = try? handle.readToEnd() {
+            lastRole = autoreleasepool { CodexRollout.parse(String(decoding: tail, as: UTF8.self)).messages.last?.role }
+        }
+        if lastRole == nil, meta != nil, let before, before.sessionId == meta?.sessionId,
+           before.size >= size - tailBytes {
+            // Nothing but tool output since the last read: its last message still stands.
+            lastRole = before.lastRole
+        }
+        if meta == nil || size <= tailBytes || lastRole == nil {
+            // A small file, or one whose ends said nothing: read it whole, as before.
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            let parsed = autoreleasepool { CodexRollout.parse(text) }
+            return Digest(modified: modified, size: size, sessionId: parsed.meta?.sessionId, cwd: parsed.meta?.cwd,
+                          isSubagent: parsed.meta?.isSubagent == true, lastRole: parsed.messages.last?.role)
+        }
+        return Digest(modified: modified, size: size, sessionId: meta?.sessionId, cwd: meta?.cwd,
+                      isSubagent: meta?.isSubagent == true, lastRole: lastRole)
+    }
+}
+
+extension SessionDiscovery {
+    static let codexDigests = CodexDigestCache()
 }
