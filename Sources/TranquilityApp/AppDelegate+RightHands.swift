@@ -265,13 +265,17 @@ extension AppDelegate {
     /// closing one goes back to the list at once.
     func presentDirectorTurn(_ answer: RightHands.Answer, as id: String) {
         hud.setCardPayload(CardPayload.parse(json: answer.card), session: id)
+        // A turn with Director is an active conversation: other audio does not make it name-only
+        // (the voice's rule, which this route never told the app about).
+        directorSpokeAt = Date()
         guard !answer.line.isEmpty else {
             Permissions.log("right-hands: Director chose silence\(answer.close ? "; the exchange is closed" : "")")
             if answer.close || !hud.conversationCard {
                 endConversationCard()
                 showIdleGrid()
             } else {
-                armConversationIdle()          // the card goes back to the list after a quiet minute
+                // Never the "…" of a turn that has answered (Codex's run 3): say plainly nothing was said.
+                noteConversation("Director gave no answer.")
             }
             return
         }

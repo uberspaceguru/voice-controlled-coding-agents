@@ -200,6 +200,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// This turn's words may be drawn: the conversation is up and nothing else
     /// is playing, or the voice took the turn as his (tb-media-aware, 26 Sep).
     var heardShown = false
+    /// His words came by summons or tap: they stay under the orb until his next
+    /// turn is taken, whatever the microphone hears meanwhile (tb-card-fixes-2).
+    var heardPinned = false
     /// Another app is playing sound: hands-free is name-only (tb-media-aware).
     var otherAudioOn = false
     var otherAudioDebounce = OtherAudio.Debounce()

@@ -129,7 +129,7 @@ extension AppDelegate {
     func showHeard(_ text: String) {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty else { return }
-        heardFinals = [words]; heardInterim = ""; heardFresh = false; heardShown = true
+        heardFinals = [words]; heardInterim = ""; heardFresh = false; heardShown = true; heardPinned = true
         hud.setManagerState(StatusHUD.orbState, line: orbLine("listening"))
     }
 
@@ -138,6 +138,9 @@ extension AppDelegate {
     func noteHeard(_ text: String, final: Bool) {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty else { return }
+        // Pinned words from a summons stay until the voice takes a turn of his; room sound and
+        // other audio heard meanwhile never replace them (Codex's run 3: a video's words did).
+        if heardPinned { return }
         if heardFresh {
             heardFinals = []; heardInterim = ""; heardFresh = false
             // Drawn as he speaks only inside a conversation with nothing else playing;
@@ -284,7 +287,7 @@ extension AppDelegate {
         conversationIdle = nil
         guard hud.conversationCard else { return }
         hud.conversationCard = false
-        heardFinals = []; heardInterim = ""; heardFresh = true
+        heardFinals = []; heardInterim = ""; heardFresh = true; heardPinned = false
         hud.setCardPayload(nil)
         Permissions.log("hands-free: a minute without a turn; the list again")
         showIdleGrid()
@@ -979,12 +982,16 @@ extension AppDelegate {
         case .listening:
             // The gate took nothing (tb-media-aware): what it heard is not drawn as
             // his words. A dismissal or a held stop keeps what he said.
-            if e.text != nil && e.reason == nil {
+            if e.text != nil && e.reason == nil && !heardPinned {
                 heardFinals = []; heardInterim = ""; heardFresh = true; heardShown = false
                 hud.setManagerState(StatusHUD.orbState, line: nameOnly ? Self.otherAudioLine : "heard, not for me")
             }
         case .addressed:
-            if heardFinals.isEmpty && heardInterim.isEmpty, let text = e.text { noteHeard(text, final: true) }
+            if heardPinned, let text = e.text {
+                heardPinned = false
+                heardFinals = []; heardInterim = ""; heardFresh = true
+                noteHeard(text, final: true)
+            } else if heardFinals.isEmpty && heardInterim.isEmpty, let text = e.text { noteHeard(text, final: true) }
             heardShown = true                   // the voice took it as his: now it is his words
             hud.setManagerState(StatusHUD.orbState, line: orbLine(Self.intentLine(e.intent)))
             noteConversation(nil, newTurn: true)
