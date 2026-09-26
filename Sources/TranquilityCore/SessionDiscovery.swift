@@ -428,17 +428,19 @@ public enum SessionDiscovery {
             at: projects, includingPropertiesForKeys: nil) else { return result }
 
         var candidates: [(URL, Date)] = []
+        var sizes: [String: Int] = [:]
         for project in projectDirs {
             // Immediate children only. A session's subagent traffic lives in
             // `<sessionId>/subagents/*.jsonl` — 7,265 files on this machine
             // against 2,634 sessions — and a subagent is not an agent you can
             // talk to.
             guard let files = try? fm.contentsOfDirectory(
-                at: project, includingPropertiesForKeys: [.contentModificationDateKey])
+                at: project, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])
             else { continue }
             for file in files where file.pathExtension == "jsonl" {
-                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate ?? .distantPast
+                let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                let modified = values?.contentModificationDate ?? .distantPast
+                sizes[file.path] = values?.fileSize ?? -1
                 // mtime stays as the PRE-filter only. An append-only file's
                 // clock can only run ahead of its last written timestamp, so
                 // nothing inside the real window is lost to this test — but
@@ -452,7 +454,10 @@ public enum SessionDiscovery {
         for (url, modified) in candidates.sorted(by: { $0.1 > $1.1 }) {
             result.scanned += 1
             let path = url.path
-            guard let head = classifiableHead(of: path) else { continue }
+            // Read once per change of the file, the head once per file (tb-cpu, 26 Sep: the
+            // walk re-read every transcript's ends every 30 s; the app idled at 15%).
+            let reads = transcriptReads.reads(path, modified: modified, size: sizes[path] ?? -1)
+            guard let head = reads.head else { continue }
 
             // The one field that separates a person's session from a robot's,
             // and unlike the tty it is on disk, so it survives the process.
@@ -474,7 +479,7 @@ public enum SessionDiscovery {
             // ten visible rows were test fixtures.
             //
             let sessionId = url.deletingPathExtension().lastPathComponent
-            let tail = SessionActivity.tail(of: path) ?? []
+            let tail = reads.tail ?? []
             let cwd = firstCwd(head: head, tail: tail)
             // Same predicate as the revive guard, one gate earlier.
             guard !isTemporary(cwd ?? "", temporaryRoots) else {
@@ -515,6 +520,7 @@ public enum SessionDiscovery {
         // is made over the whole population. Capping each harness separately
         // would quietly reserve half the list for whichever one this machine
         // happens to use less.
+        transcriptReads.keep(only: Set(candidates.map { $0.0.path }))
         let codex = codexWalk(window: window, limit: limit, now: now, sessions: sessions)
         kept.append(contentsOf: codex.sessions)
         result.scanned += codex.scanned
@@ -981,6 +987,15 @@ final class CodexDigestCache: @unchecked Sendable {
         let before = held[url.path]
         lock.unlock()
         if let d = before, d.modified == modified, d.size == size { return d }
+        if let d = before, d.sessionId != nil, size >= d.size, size > Self.tailBytes {
+            // Grown at the end: its first record is what it was. Only the tail is read.
+            if let role = Self.lastRole(url, size: size) ?? (d.size >= size - Self.tailBytes ? d.lastRole : nil) {
+                var grown = d
+                grown.modified = modified; grown.size = size; grown.lastRole = role
+                lock.lock(); held[url.path] = grown; reads += 1; lock.unlock()
+                return grown
+            }
+        }
         guard let fresh = Self.read(url, modified: modified, size: size, before: before) else { return nil }
         lock.lock(); held[url.path] = fresh; reads += 1; lock.unlock()
         return fresh
@@ -988,6 +1003,14 @@ final class CodexDigestCache: @unchecked Sendable {
 
     func keep(only paths: Set<String>) {
         lock.lock(); held = held.filter { paths.contains($0.key) }; lock.unlock()
+    }
+
+    static func lastRole(_ url: URL, size: Int) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard (try? handle.seek(toOffset: UInt64(max(0, size - tailBytes)))) != nil,
+              let tail = try? handle.readToEnd() else { return nil }
+        return autoreleasepool { CodexRollout.parse(String(decoding: tail, as: UTF8.self)).messages.last?.role }
     }
 
     static func read(_ url: URL, modified: Date, size: Int, before: Digest? = nil) -> Digest? {
@@ -1025,4 +1048,47 @@ final class CodexDigestCache: @unchecked Sendable {
 
 extension SessionDiscovery {
     static let codexDigests = CodexDigestCache()
+}
+
+/// A Claude Code transcript's head and tail, kept per file: the tail until the
+/// file changes, the head for good once it names its entrypoint (the file only
+/// grows at the end).
+final class TranscriptReadCache: @unchecked Sendable {
+    struct Entry {
+        var modified: Date
+        var size: Int
+        var head: [String]?
+        var tail: [String]?
+    }
+
+    private let lock = NSLock()
+    private var held: [String: Entry] = [:]
+    private(set) var tailReads = 0
+    private(set) var headReads = 0
+
+    func reads(_ path: String, modified: Date, size: Int) -> (head: [String]?, tail: [String]?) {
+        lock.lock()
+        let before = held[path]
+        lock.unlock()
+        if let e = before, e.modified == modified, e.size == size { return (e.head, e.tail) }
+        var head = before?.head
+        if head == nil || SessionDiscovery.entrypoint(head: head ?? []) == nil || size < (before?.size ?? 0) {
+            head = SessionDiscovery.classifiableHead(of: path)
+            lock.lock(); headReads += 1; lock.unlock()
+        }
+        let tail = head == nil ? nil : SessionActivity.tail(of: path)
+        lock.lock()
+        tailReads += 1
+        held[path] = Entry(modified: modified, size: size, head: head, tail: tail)
+        lock.unlock()
+        return (head, tail)
+    }
+
+    func keep(only paths: Set<String>) {
+        lock.lock(); held = held.filter { paths.contains($0.key) }; lock.unlock()
+    }
+}
+
+extension SessionDiscovery {
+    static let transcriptReads = TranscriptReadCache()
 }

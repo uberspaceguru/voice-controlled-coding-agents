@@ -159,8 +159,16 @@ extension AppDelegate {
     func watchOtherAudio() {
         guard otherAudioTimer == nil else { return }
         otherAudioDebounce = OtherAudio.Debounce()
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sampleOtherAudio() }
+        // Every 2 s, the Core Audio walk off the main thread (tb-cpu: once a second on
+        // the main thread it was the app's steady idle cost).
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.managerIsOn else { return }
+                Task.detached(priority: .utility) {
+                    let players = OtherAudio.players(excluding: OtherAudio.family(of: getpid()))
+                    await MainActor.run { [weak self] in self?.sampleOtherAudio(players) }
+                }
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         otherAudioTimer = timer
@@ -174,9 +182,8 @@ extension AppDelegate {
         nameOnlyShown = false
     }
 
-    private func sampleOtherAudio() {
+    private func sampleOtherAudio(_ players: [OtherAudio.Player]) {
         guard managerIsOn else { return }
-        let players = OtherAudio.players(excluding: OtherAudio.family(of: getpid()))
         let who = Array(Set(players.map { $0.bundle.isEmpty ? "pid \($0.pid)" : $0.bundle })).sorted()
         if otherAudioDebounce.update(!players.isEmpty) {
             otherAudioOn = otherAudioDebounce.on
