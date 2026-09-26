@@ -267,6 +267,31 @@ def hearing_check(text: str) -> bool:
     return "?" in text or set(words) <= {"hello", "hi"} or bool(_GREETINGS & set(words))
 
 
+# A dismissal ends the exchange (tb-dismissal, 26 Sep 11:02: "the visual part
+# sucks. All right, just go away." got "Looking at the fleet." and a recap):
+# code answers it with silence, before any filler, model or lookup, and the
+# conversation window closes, so only his name opens it again. It is the LAST
+# sentence of the turn, with the "all right"s and the name taken off.
+_DISMISSALS = {
+    "go away", "stop", "that's all", "that is all", "leave it", "never mind", "nevermind", "shut up", "quiet",
+    "be quiet", "forget it", "stop talking", "that's enough", "enough", "leave me alone", "leave it there",
+}
+_DISMISS_EDGES = {"all", "right", "alright", "ok", "okay", "just", "fine", "oh", "please", "director", "directory",
+                  "tranquility", "thanks", "thank", "you", "now", "for"}
+
+
+def dismissal(text: str) -> bool:
+    sentences = [s for s in re.split(r"[.!?;]+", (text or "").lower()) if re.search(r"[a-z]", s)]
+    if not sentences:
+        return False
+    words = re.findall(r"[a-z']+", sentences[-1].replace("\u2019", "'"))
+    while words and words[0] in _DISMISS_EDGES and " ".join(words) not in _DISMISSALS:
+        words.pop(0)
+    while words and words[-1] in _DISMISS_EDGES and " ".join(words) not in _DISMISSALS:
+        words.pop()
+    return " ".join(words) in _DISMISSALS
+
+
 def wants_filler(words: str) -> bool:
     """No filler for a hearing check, a count or a yes/no question."""
     return not _NO_FILLER.search((words or "").strip())

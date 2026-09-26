@@ -247,7 +247,8 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             self.m._do_mute = AsyncMock()
             await self.m._dialogue_turn("stop", None, None)
             await self.m._dialogue_turn("   ", None, None)
-        asked = [(c.args[3], c.args[-1]) for c in run.await_args_list]
+            await asyncio.sleep(0)          # the dismissal's record runs inside the fake, never the real director
+        asked = [(c.args[3], c.args[-1]) for c in run.await_args_list if "ask" in c.args]
         self.assertEqual(asked, [("what needs me?", "ac03daf5"), ("yes", "ac03daf5"), ("the second one", "ac03daf5"),
                                  ("tell the Wispr worker yes", "ac03daf5")],
                          "named, then follow-ups, one thread; the room's talk after the window is ignored")
@@ -397,14 +398,18 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
         replies = [(0, _json.dumps({"reply": "", "incomplete": True})),
                    (0, _json.dumps({"reply": "The second one is TeamChat.", "incomplete": False})),
-                   (0, _json.dumps({"reply": "", "close": True}))]
+                   (0, "")]                 # tb-dismissal: "that's all" is closed by code; only the record runs
         run = AsyncMock(side_effect=replies)
+        self.m.broadcast_interruption = AsyncMock()
+        self.m._do_mute = AsyncMock()
         with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()):
             await self.m._dialogue_turn("Director, and the second one is", None, None)
             await self.m._dialogue_turn("the TeamChat one?", None, None)
             self.assertEqual(run.await_args_list[1].args[3], "and the second one is the TeamChat one?",
                              "the rest is joined to the held half")
             await self.m._dialogue_turn("thanks, that's all", None, None)
+            await asyncio.sleep(0)
+        self.assertNotIn("ask", run.await_args_list[-1].args, "no ask for a closing")
         self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["The second one is TeamChat."])
         self.assertEqual(self.m._follow_up_until, 0.0, "closed: the next line needs a name")
 
@@ -441,6 +446,41 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asked, [], "no model, no lookup")
         logged = [c.args for c in run.await_args_list if "voice-event" in c.args]
         self.assertTrue(logged and all("hearing_check" in a for a in logged))
+
+    async def test_a_dismissal_ends_the_exchange_in_silence(self):
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        run = AsyncMock(return_value=(0, json.dumps({"reply": "Here is the whole recap again."})))
+        self.m.broadcast_interruption = AsyncMock()
+        self.m._do_mute = AsyncMock()
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()), \
+                patch("dialogue_manager.emit", AsyncMock()), patch.object(d, "FILLER_AFTER", 0.0):
+            await self.m._dialogue_turn("Director, what needs me?", None, None)
+            self.m._say.reset_mock()
+            run.reset_mock()
+            # 26 Sep 11:02, talk_log 437-439: said inside the conversation window, merged with what came before
+            await self.m._dialogue_turn("the visual part sucks. All right, just go away.", None, None)
+            await asyncio.sleep(0)
+            self.m._say.assert_not_awaited()
+            self.m._do_mute.assert_awaited_once()
+            self.assertEqual([c.args for c in run.await_args_list if "ask" in c.args], [], "no model, no filler")
+            self.assertTrue(any("dismissal" in c.args for c in run.await_args_list), "logged for Director")
+            await self.m._dialogue_turn("what's the weather like", None, None)
+            self.assertEqual([c.args for c in run.await_args_list if "ask" in c.args], [],
+                             "the window is closed: the room's talk is not his to Director")
+            await self.m._dialogue_turn("Director, one more thing: what's ready?", None, None)
+        self.assertEqual([c.args[3] for c in run.await_args_list if "ask" in c.args], ["one more thing: what's ready?"],
+                         "his name opens it again")
+
+    def test_what_counts_as_a_dismissal(self):
+        for yes in ("go away", "All right, just go away.", "the visual part sucks. All right, just go away.", "Stop.",
+                    "That's all.", "thanks, that's all", "Leave it.", "Never mind.", "nevermind", "Shut up.", "Quiet!",
+                    "Director, go away.", "okay, forget it", "That's enough.", "Just leave me alone."):
+            self.assertTrue(d.dismissal(yes), yes)
+        for no in ("go away and fix the build", "stop the build", "never mind the build, what's ready?",
+                   "Is that all?", "What's the weather?", "don't go away", "quiet down the logs please",
+                   "Stop. Tell me about the first one.", "That's all for the Wispr one, what else?", ""):
+            self.assertFalse(d.dismissal(yes := no), no)
 
     def test_what_counts_as_a_hearing_check(self):
         for yes in ("Hello?", "Director?", "Hello. Director, you there?", "are you there", "Tranquility, can you hear me?",

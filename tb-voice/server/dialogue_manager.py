@@ -285,6 +285,23 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
                 asyncio.ensure_future(self._log_voice_event("hearing_check", text, director_link.HEARING_REPLY))
                 return
+            if default and director_link.dismissal(text):
+                # "All right, just go away.": the exchange is over. Nothing is said, nothing is
+                # asked, anything still playing stops, and only his name opens it again.
+                settled = True
+                self._judging = None
+                self._input_ready.set()
+                self._called = None
+                self._held_fragment = None
+                self._follow_up_until = 0.0
+                self.dialogue.begin()               # whatever was in flight is superseded, never spoken
+                note("you", text, "dismissal: silent")
+                logger.info(f"dismissed: {text[:80]!r}; quiet until he names Director")
+                await self.broadcast_interruption()
+                await self._do_mute("", frame, direction)
+                await emit(self, "listening", reason="dismissed", text=text[:120])
+                asyncio.ensure_future(self._log_voice_event("dismissal", text, ""))
+                return
             held = getattr(self, "_held_fragment", None)
             if default and held and now - held[1] < director_link.HOLD_FRAGMENT_SECS:
                 # the rest of a sentence Director held as unfinished

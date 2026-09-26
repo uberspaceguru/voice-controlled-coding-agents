@@ -194,7 +194,9 @@ class LateSpeech(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.merges(), [])
         self.assertEqual(len(self.asks.argv), 1)
         self.asks.gates[0].set()
-        await first
+        # tb-dismissal (26 Sep): "Stop." ends the exchange; the answer still pending is never spoken
+        with self.assertRaises(asyncio.CancelledError):
+            await first
 
     async def test_a_turn_already_answered_or_ignored_takes_nothing(self):
         await self.turn("Director, what needs me?")
