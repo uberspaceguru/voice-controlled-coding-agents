@@ -294,6 +294,35 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c for c in emit.await_args_list if c.args[1:] == ("answer",)], [])
         self.assertEqual(len(run.await_args_list), 2, "the follow-up needed no name")
 
+    async def test_a_slow_answer_is_announced_not_silent(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+
+        async def slow(*argv, timeout=60):
+            await asyncio.sleep(0.25)
+            return 0, "Eleven things need you."
+        with patch.dict(os.environ, env), patch("manager._run", slow), patch("manager.emit", AsyncMock()), \
+                patch.object(d, "SHORT_BRIDGE_AFTER", 0.05), patch.object(d, "LONG_BRIDGE_AFTER", 0.15):
+            await self.m._dialogue_turn("Director, tell me more about the GPU one", None, None)
+        said = [c.args[0] for c in self.m._say.await_args_list]
+        self.assertEqual(said[0], "Mm.")
+        self.assertEqual(said[1], "Let me look at the GPU one.")
+        self.assertEqual(said[-1], "Eleven things need you.")
+
+    async def test_a_quick_answer_has_no_token(self):
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        with patch.dict(os.environ, env), patch("manager._run", AsyncMock(return_value=(0, "Yes, I hear you."))), \
+                patch("manager.emit", AsyncMock()):
+            await self.m._dialogue_turn("Director, can you hear me?", None, None)
+        self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Yes, I hear you."])
+
+    def test_tokens_never_repeat_back_to_back(self):
+        self.assertNotEqual(d.bridge("short", "", "Mm."), "Mm.")
+        self.assertEqual(d.bridge("long", "what about the TeamChat desktop one?"), "Let me look at the TeamChat desktop one.")
+        self.assertNotEqual(d.bridge("long", "anything", "Let me look into that."), "Let me look into that.")
+
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)
         self.assertEqual(self.m._say.await_args.args[0], "TeamChat Manager isn't connected yet.")

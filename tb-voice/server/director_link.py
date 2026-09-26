@@ -196,6 +196,27 @@ def is_echo(text: str, last_answer: str | None, age: float) -> bool:
     return len(heard) >= 2 and sum(w in said for w in heard) / len(heard) >= 0.75
 
 
+# Delay is announced, the way people do it (Clark & Fox Tree 2002: "uh" for a
+# short delay, "um" for a long one; Kendrick & Torreira 2015: silence past
+# ~700 ms is heard as trouble; a 2025 study: a spoken filler eased 4-6.5 s waits,
+# a sound or icon did nothing). Ahmed's first session had 3-5 s of unannounced
+# silence per turn and "are you there?" four times in four minutes.
+SHORT_BRIDGE_AFTER = 0.7     # s from the ask: a one-syllable token keeps the floor
+LONG_BRIDGE_AFTER = 3.0      # s: say what it is doing, tied to his words
+_SHORT = ("Mm.", "So,", "Right,", "Well,")
+_TOPIC = re.compile(r"(?i)\b(the\s+[\w-]+(?:\s+[\w-]+)?\s+one)\b")
+
+
+def bridge(kind: str, words: str, last: str | None = None) -> str:
+    """The delay token: never the same line twice in a row; the long one names
+    what Director is looking at when he named it ("the GPU one")."""
+    if kind == "short":
+        return next(t for t in _SHORT if t != last)
+    m = _TOPIC.search(words or "")
+    options = ([f"Let me look at {m.group(1)}."] if m else []) + ["Let me look into that.", "One moment, checking."]
+    return next(t for t in options if t != last)
+
+
 def director_default() -> bool:
     """The host talks to Director by default (the Director app)."""
     return os.getenv("TB_DEFAULT_INTERLOCUTOR", "").strip().lower() == "director"

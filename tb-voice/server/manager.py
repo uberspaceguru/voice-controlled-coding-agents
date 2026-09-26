@@ -643,6 +643,29 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         else:
             await self._say(line, response_mode="receipt")
 
+    async def _bridge_while(self, ask, name: str, words: str, asked: float):
+        """While the answer is on its way, announce the delay instead of leaving
+        silence: a short token past SHORT_BRIDGE_AFTER, a line naming what it is
+        doing past LONG_BRIDGE_AFTER. Each at most once per turn; nothing when
+        the answer is quick."""
+        import director_link
+        for after, kind in ((director_link.SHORT_BRIDGE_AFTER, "short"),
+                            (director_link.LONG_BRIDGE_AFTER, "long")):
+            wait = after - (time.monotonic() - asked)
+            if wait > 0:
+                try:
+                    await asyncio.wait_for(asyncio.shield(ask), timeout=wait)
+                    return
+                except asyncio.TimeoutError:
+                    pass
+            if ask.done():
+                return
+            line = director_link.bridge(kind, words, getattr(self, "_last_bridge", None))
+            self._last_bridge = line
+            await self._say(line, voice="director" if name == "Director" else "manager",
+                            response_mode="receipt")
+            self._require_current()
+
     async def _relay_hand(self, name: str, words: str, text: str):
         """'Director, …', 'Yobi1, …', 'Sys-3PO, …': the hand answers, never this
         voice. Its `ask` runs here (Director's in the session's one thread, so
@@ -663,7 +686,10 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             return
         await emit(self, "tool", argv=[name, words[:80]], meaning=f"asking {name}")
         asked = time.monotonic()
-        code, out = await _run(*argv, timeout=60)
+        ask = asyncio.ensure_future(_run(*argv, timeout=60))
+        if director_link.director_default():
+            await self._bridge_while(ask, name, words, asked)
+        code, out = await ask
         self._require_current()
         reply = director_link.flatten(out) if code == 0 else ""
         if code == 0 and not reply:
