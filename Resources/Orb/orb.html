@@ -575,6 +575,11 @@ window.Orb = {MODE_DRAWS: Ct, MODE_FRAMES: vt, STATE_TO_MODE: Ot, finalizeFrame:
   // toward a target that eases over ~700 ms, so a mood is a fade, never a switch.
   const TINTS = { "": [232, 230, 223], hearing: [126, 176, 138], speaking: [201, 167, 90] };
   let tint = TINTS[""].slice(), target = TINTS[""];
+  // Moving only while it hears him or speaks (tb-media-aware-2, 26 Sep: the orb
+  // redrew every frame while idle, all day). At rest the colour settles, one
+  // last frame is drawn, and the loop stops until the next setOrb.
+  let moving = false;
+  const settled = () => tint.every((c, i) => Math.abs(c - target[i]) < 0.5);
   function paintOnce() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, size, size);
     ctx.globalCompositeOperation = "source-over";
@@ -593,11 +598,13 @@ window.Orb = {MODE_DRAWS: Ct, MODE_FRAMES: vt, STATE_TO_MODE: Ot, finalizeFrame:
     ctx.globalCompositeOperation = "source-in";
     ctx.fillStyle = `rgb(${tint[0] | 0}, ${tint[1] | 0}, ${tint[2] | 0})`;
     ctx.fillRect(0, 0, size, size);
+    if (!moving && settled()) { raf = 0; return; }
     raf = requestAnimationFrame(frame);
   }
   let drawOpts;
   window.setOrb = function (state, line, mood) {
     target = TINTS[mood || ""] || TINTS[""];
+    moving = !!(mood && TINTS[mood]);
     const p = resolvePreset(state, size);
     draw = MODE_DRAWS[p.mode]; speed = p.speed * SLOW; drawOpts = p.opts;
     if (line !== undefined) document.getElementById("line").textContent = line;

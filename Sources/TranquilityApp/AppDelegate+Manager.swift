@@ -131,7 +131,8 @@ extension AppDelegate {
             heardShown = hud.conversationCard && !nameOnly
         }
         if final { heardFinals.append(words); heardInterim = "" } else { heardInterim = words }
-        hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: "hearing")
+        // Other audio in name-only mode does not move the orb: it moves for him
+        hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: nameOnly ? "" : "hearing")
     }
 
     /// The strip under the orb: his words this turn, quoted, the newest end
@@ -953,7 +954,7 @@ extension AppDelegate {
                 sendManagerCommand(["cmd": "stage", "session": pending.session, "name": pending.name])
             }
         case .hearing:
-            hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: "hearing")
+            hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: nameOnly ? "" : "hearing")
         case .listening:
             // The gate took nothing (tb-media-aware): what it heard is not drawn as
             // his words. A dismissal or a held stop keeps what he said.
