@@ -967,7 +967,9 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             async with self._voice:
                 self._require_current()
                 self._reply_starting()
-                await emit(self, "speaking", voice=voice, session=session, text=text[:160])
+                # The whole sentence: the card shows it once and whole (tb-card-text, 26 Sep; it was cut
+                # at 160 characters, mid-word, "not a rea").
+                await emit(self, "speaking", voice=voice, session=session, text=text[:1200])
                 guard = self._speech_guard()
                 delivery = self.deliverybook.create(text, current=guard)
                 self._last_delivery = delivery

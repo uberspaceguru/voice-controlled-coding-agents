@@ -265,6 +265,19 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         m.deliverybook.finish(m._last_delivery, "failed", "synthetic_provider_failure")
         self.assertFalse(await task)
 
+    async def test_the_speaking_event_carries_the_whole_sentence(self):
+        # tb-card-text (26 Sep): the card showed "not a rea"; the event cut the sentence at 160 characters
+        m = manager()
+        m.deliverybook.on_change = lambda _: None
+        async def push(frame, *args):
+            m.deliverybook.finish(frame.delivery, "output_complete", "synthetic")
+        m.push_frame.side_effect = push
+        sentence = "Nothing is finished on the react parity front end yet; " * 5
+        with patch("manager.emit", AsyncMock()) as emit:
+            await Manager._say(m, sentence, voice="director")
+        spoken = [c.kwargs["text"] for c in emit.await_args_list if c.args[1:] == ("speaking",)]
+        self.assertEqual(spoken, [sentence])
+
     async def test_real_say_retries_interrupted_output_at_most_once(self):
         m = manager()
         m.deliverybook.on_change = lambda _: None
