@@ -250,7 +250,7 @@ final class ActionRowView: NSView {
         }
     }
 
-    private static func door(_ title: String, id: String, ink: NSColor, target: AnyObject,
+    static func door(_ title: String, id: String, ink: NSColor, target: AnyObject,
                              action: Selector) -> NSButton {
         let b = NSButton(title: title, target: target, action: action)
         b.identifier = NSUserInterfaceItemIdentifier(id)

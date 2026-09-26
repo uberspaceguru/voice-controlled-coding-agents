@@ -702,6 +702,12 @@ extension StatusHUD {
         waitingRows.orientation = .vertical
         waitingRows.alignment = .leading
         waitingRows.spacing = 2
+        // Under the sentence on Director's conversation card (M26).
+        cardPayloadView = NSStackView()
+        cardPayloadView.orientation = .vertical
+        cardPayloadView.alignment = .leading
+        cardPayloadView.spacing = 4
+        cardPayloadView.isHidden = true
 
         // The strip's furniture sits BELOW the body and above the meter, so a
         // capture extends the panel downward and the card above it does not
@@ -714,7 +720,7 @@ extension StatusHUD {
         // directly above. Same downward-growth as the strip — a drop extends
         // the panel, it never moves the card.
         let stack = NSStackView(views: [backButton, stateLabel, titleLabel,
-                                        waitingRows, pastList, bodyLabel,
+                                        waitingRows, pastList, bodyLabel, cardPayloadView,
                                         stripRule, stripLabel, trayRow, gridFooter,
                                         countdownBar, micRow, meter,
                                         settingsTabs, agentGrid, launchRow, directoryRow,

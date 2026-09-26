@@ -54,6 +54,9 @@ public struct ManagerEvent: Codable, Equatable, Sendable {
         /// manager mutes its mic for the line's length; the card's voice is
         /// echo there.
         case answer
+        /// What Director's card shows with the sentence that follows (M26):
+        /// `card` is the payload as a JSON string (`CardPayload`), empty to clear.
+        case card
     }
     public var event: Kind
     public var t: Double?
@@ -70,6 +73,7 @@ public struct ManagerEvent: Codable, Equatable, Sendable {
     public var meaning: String?
     public var reason: String?
     public var secs: Int?
+    public var card: String?
 
     public static func parse(_ line: Data) -> ManagerEvent? {
         try? JSONDecoder().decode(ManagerEvent.self, from: line)

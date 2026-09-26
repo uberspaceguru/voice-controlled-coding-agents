@@ -273,3 +273,32 @@ finished), six at most:
 
 The row itself does nothing when tapped. `scripts/install-director.sh` gives
 Director its `actions` command in the Director app's roster.
+
+## What the card shows while Director talks (26 Sep, M26)
+
+Each Director turn can carry a payload, drawn under the sentence on the
+hands-free conversation card while it plays. It stays until the next turn,
+which replaces it or clears it. `director --json ask` returns it as
+`card_json`. The `card` key is still the sentence. The voice
+(`director_link.card_payload`) passes it to the app as a `card` event, sent
+before the sentence. The event's `card` field holds the object as a JSON
+string, and an empty string clears the card. A turn Director stays silent on
+leaves the card alone.
+
+| `kind`   | fields | drawn as |
+|----------|--------|----------|
+| `list`   | `title?`, `rows: [{n?, project?, title, age?, agent?}]` | up to six rows reading "n  project · title", each with its age and **Go to Agent ›** underneath |
+| `item`   | `n?`, `project?`, `title`, `question?`, `agent?`, `reply: "approve" \| "answer" \| null`, `action_id?` | the subject, the full question, then **Approve ›** (when the reply is `approve`) or **Answer ›** (when it is `answer`), then **Go to Agent ›** |
+| `action` | a `pending_actions` row: `id`, `what` (or `title`), `state`, `target?`, `started_at?`, `finished_at?` | the action row: its state chip, **Approve ›** while it waits on him, and **Go to Agent ›** |
+| `screen` | `agent?`, `lines: [..]` (or `text`) | the pane's last 18 lines, monospaced and never wrapped, under the agent's name with **Go to Agent ›** |
+| `none`   | | nothing |
+
+The buttons:
+
+- **Go to Agent ›** and **Answer ›** open Ghostty on the agent's tmux session.
+- **Approve ›** sends one `director --json ask "Yes, I approve action <id>: …" --named`
+  in Director's card thread. If there is no `action_id`, it uses "number <n>".
+  Director's reply is shown, not spoken, and its `card_json` becomes the next
+  card.
+
+Offline poses: `handsfree-conversation-list`, `-item`, `-action` and `-screen`.
