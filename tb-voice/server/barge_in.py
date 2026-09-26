@@ -48,8 +48,9 @@ BACKCHANNEL = {
 BACKCHANNEL_PHRASES = ("got it", "i see", "all right", "makes sense", "uh huh", "mm hm", "mm hmm",
                        "fair enough", "sounds good", "that makes sense")
 # Words that take the floor on their own (R9): the keyword alone is enough.
+# "What?" over the voice is a repair ("I didn't catch that"): it takes the floor.
 STOP_WORDS = {"stop", "wait", "no", "nope", "pause", "quiet", "cancel", "hush", "sorry",
-              "actually", "director", "hey", "excuse"}
+              "actually", "director", "hey", "excuse", "what", "pardon"}
 STOP_PHRASES = ("hold on", "hang on", "shut up", "never mind", "nevermind", "one sec", "one second",
                 "just a sec", "stop it", "not that", "that's not", "thats not", "be quiet",
                 "that's enough", "thats enough")

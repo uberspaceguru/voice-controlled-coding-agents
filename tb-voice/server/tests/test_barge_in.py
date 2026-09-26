@@ -38,8 +38,8 @@ class Verdicts(unittest.TestCase):
             ("Stop.", "stop"), ("wait", "stop"), ("No.", "stop"), ("hold on", "stop"),
             ("Hang on a second", "stop"), ("shut up", "stop"), ("never mind", "stop"),
             ("no no no", "stop"), ("Actually,", "stop"), ("Director", "stop"),
-            ("okay stop", "stop"), ("yeah but wait", "stop"),
-            ("what about the other one", "claim"), ("tell Yobi one to ship it", "claim"),
+            ("okay stop", "stop"), ("yeah but wait", "stop"), ("What?", "stop"),
+            ("tell me about the other one", "claim"), ("tell Yobi one to ship it", "claim"),
             ("I", "wait"), ("Seriously", "wait"), ("", "empty"), ("...", "empty"),
         ]
         for text, want in table:
@@ -60,12 +60,12 @@ class Verdicts(unittest.TestCase):
         # His words, even beside its own, are his.
         self.assertEqual(classify("stop", speaking_text=LINE), "stop")
         self.assertEqual(classify("no the other one", speaking_text=LINE), "stop")
-        self.assertEqual(classify("what's the GPU one", speaking_text=LINE), "claim")
+        self.assertEqual(classify("how's the GPU one", speaking_text=LINE), "claim")
 
     def test_hold_is_short_and_a_stop(self):
         for text in ("Stop.", "wait", "hold on", "no", "Director", "no no no"):
             self.assertTrue(is_hold(text), text)
-        for text in ("mm-hm", "no, the other one please", "what about the GPU one"):
+        for text in ("mm-hm", "no, the other one please", "tell me about the GPU one"):
             self.assertFalse(is_hold(text), text)
 
 
@@ -100,8 +100,8 @@ class Strategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_claim_needs_two_words(self):
         await self.s.process_frame(BotStartedSpeakingFrame())
-        self.assertEqual(await self.say("what"), ProcessFrameResult.CONTINUE)
-        self.assertEqual(await self.say("what about"), ProcessFrameResult.STOP)
+        self.assertEqual(await self.say("tell"), ProcessFrameResult.CONTINUE)
+        self.assertEqual(await self.say("tell me"), ProcessFrameResult.STOP)
 
     async def test_its_own_voice_does_not_interrupt(self):
         await self.s.process_frame(BotStartedSpeakingFrame())
