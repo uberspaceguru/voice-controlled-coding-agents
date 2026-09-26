@@ -18,8 +18,12 @@ EXTERNAL_UNTIL = {"t": 0.0}
 
 
 class WhileBotSpeaksMuteStrategy(BaseUserMuteStrategy):
-    def __init__(self, tail_secs: float = 0.6):
+    """`cancels_own_voice`: the client removed the manager's voice from the mic
+    (WebRTC, local_rtc.py), so only the app's own voice mutes. See echo.py."""
+
+    def __init__(self, tail_secs: float = 0.6, cancels_own_voice: bool = False):
         super().__init__()
+        self._cancels_own_voice = cancels_own_voice
         self._speaking = False
         self._stopped_at = 0.0
         self._tail = tail_secs
@@ -31,5 +35,7 @@ class WhileBotSpeaksMuteStrategy(BaseUserMuteStrategy):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._speaking = False
             self._stopped_at = time.monotonic()
+        if self._cancels_own_voice:
+            return time.monotonic() < EXTERNAL_UNTIL["t"]
         return (self._speaking or (time.monotonic() - self._stopped_at) < self._tail
                 or time.monotonic() < EXTERNAL_UNTIL["t"])
