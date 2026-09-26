@@ -292,6 +292,22 @@ def dismissal(text: str) -> bool:
     return " ".join(words) in _DISMISSALS
 
 
+# One filler per growing sentence (tb-filler-once, 26 Sep, talk_log 429/431 and
+# 437/439): a turn re-asked with more words (late speech joined to it, a held
+# half and its rest) is the same sentence growing, and it had its filler.
+FILLER_ONCE_SECS = 60.0
+
+
+def _plain(words: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9']+", (words or "").lower().replace("\u2019", "'")))
+
+
+def same_sentence(words: str, before: str) -> bool:
+    """`words` is `before` grown (or `before` again): one extends the other from the start."""
+    a, b = _plain(words), _plain(before)
+    return bool(a and b) and (a.startswith(b) or b.startswith(a))
+
+
 def wants_filler(words: str) -> bool:
     """No filler for a hearing check, a count or a yes/no question."""
     return not _NO_FILLER.search((words or "").strip())

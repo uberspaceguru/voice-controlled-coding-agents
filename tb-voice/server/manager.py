@@ -727,6 +727,12 @@ class Manager(DialogueManagerMixin, FrameProcessor):
                 pass
         if ask.done():
             return
+        said = getattr(self, "_filler_said", None)
+        if (said and time.monotonic() - said[1] < director_link.FILLER_ONCE_SECS
+                and director_link.same_sentence(words, said[0])):
+            logger.info(f"no filler: {words[:60]!r} is the sentence that already had one")
+            return
+        self._filler_said = (words, time.monotonic())
         recent = getattr(self, "_recent_fillers", [])
         line = director_link.filler(words, recent)
         self._recent_fillers = (recent + [line])[-3:]

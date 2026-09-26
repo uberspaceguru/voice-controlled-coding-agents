@@ -357,6 +357,35 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(logged), 1)
         self.assertIn("Checking.", logged[0])
 
+    async def test_one_filler_per_growing_sentence(self):
+        # tb-filler-once (26 Sep, talk_log 429/431): "There is a lot that needs to be improved. About this entire
+        # experience. You need multiple apps." got a filler, and the same sentence grown by one more clause got another
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+
+        async def slow(*argv, timeout=60, quiet=False):
+            if "voice-event" in argv:
+                return 0, ""
+            await asyncio.sleep(0.2)
+            return 0, "Noted."
+        first = "Director, there is a lot that needs to be improved. You need multiple apps."
+        with patch.dict(os.environ, env), patch("manager._run", slow), patch("manager.emit", AsyncMock()), \
+                patch.object(d, "FILLER_AFTER", 0.05):
+            await self.m._dialogue_turn(first, None, None)
+            await self.m._dialogue_turn(first + " You may need some sort of computer use.", None, None)
+            await self.m._dialogue_turn("Director, tell me more about the GPU one", None, None)
+            await asyncio.sleep(0)
+        said = [c.args[0] for c in self.m._say.await_args_list]
+        fillers = [x for x in said if x in d.FILLERS or x.endswith(", looking.")]
+        self.assertEqual(len(fillers), 2, f"one for the growing sentence, one for the new question: {said}")
+
+    def test_what_is_the_same_sentence_growing(self):
+        self.assertTrue(d.same_sentence("the visual part sucks. All right, just go away.", "the visual part sucks."))
+        self.assertTrue(d.same_sentence("There is a lot, you need multiple apps", "There is a lot. You need multiple apps."))
+        self.assertFalse(d.same_sentence("what needs me?", "what is ready?"))
+        self.assertFalse(d.same_sentence("", "anything"))
+
     async def test_no_filler_for_a_hearing_check_a_count_or_a_yes_no(self):
         import asyncio
         from unittest.mock import AsyncMock, patch
