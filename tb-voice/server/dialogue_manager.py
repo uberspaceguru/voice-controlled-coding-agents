@@ -273,6 +273,18 @@ class DialogueManagerMixin(MemoryManagerMixin):
             if default:
                 # "Stop. Tell me about the first one.": the stop was acted on over the voice; the rest is the turn
                 text = director_link.after_stop(text)
+            if default and director_link.hearing_check(text):
+                # "Hello, Director, you there?": code answers at once; no model, no filler, no lookup
+                settled = True
+                self._judging = None
+                self._input_ready.set()
+                self._called = None
+                note("you", text, "hearing check")
+                await emit(self, "addressed", intent="director_hearing_check", text=text[:120])
+                await self._say(director_link.HEARING_REPLY, voice="director", response_mode="receipt")
+                self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
+                asyncio.ensure_future(self._log_voice_event("hearing_check", text, director_link.HEARING_REPLY))
+                return
             held = getattr(self, "_held_fragment", None)
             if default and held and now - held[1] < director_link.HOLD_FRAGMENT_SECS:
                 # the rest of a sentence Director held as unfinished

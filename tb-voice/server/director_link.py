@@ -219,6 +219,32 @@ _NO_FILLER = re.compile(
     r"|^\W*(is|did|are|does|do|can|could|will|would|was|were|has|have|had|should)\b)")
 
 
+# A hearing check is answered by code, at once, before any model or filler timer
+# (Ahmed, 26 Sep 09:55: "Hello. Director, you there?" got "Let me check that."
+# then 1.3 s of model). The words left after the greetings and the names must be
+# one of these, or nothing at all when he only said a name or "hello?".
+_CHECK_WORDS = {"hello", "hi", "hey", "yo", "director", "tranquility", "tranquillity"}
+HEARING_CHECKS = {
+    "", "you there", "are you there", "you still there", "are you still there", "still there",
+    "can you hear me", "you hear me", "do you hear me", "can you hear me now", "hear me",
+    "are you here", "you here", "are you listening", "you listening", "are you awake", "you awake",
+    "are you with me", "you with me", "are you alive", "you alive", "anyone there", "is anyone there",
+}
+HEARING_REPLY = "Yes, I'm here."
+
+
+def hearing_check(text: str) -> bool:
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    if not words:
+        return False
+    rest = " ".join(w for w in words if w not in _CHECK_WORDS)
+    if rest:
+        return rest in HEARING_CHECKS
+    # Only greetings and names: "Director?" and "Hello?" are checks; "Director." and "Hey, Director." stay calls
+    # (the next words go to Director), as before.
+    return "?" in text or set(words) <= {"hello", "hi"}
+
+
 def wants_filler(words: str) -> bool:
     """No filler for a hearing check, a count or a yes/no question."""
     return not _NO_FILLER.search((words or "").strip())

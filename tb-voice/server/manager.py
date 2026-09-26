@@ -699,6 +699,18 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             if once:
                 return
 
+    async def _log_voice_event(self, kind: str, heard: str, said: str, ms: int | None = None):
+        """A line the voice said on its own, as a talk_log row Director can see (director voice-event)."""
+        import director_link
+        argv = [director_link.director_bin(), "voice-event", "--kind", kind, "--thread", director_link.session_thread(),
+                "--heard", heard[:300], "--said", said]
+        if ms is not None:
+            argv += ["--ms", str(ms)]
+        try:
+            await _run(*argv, timeout=15, quiet=True)
+        except Exception:  # noqa: BLE001 - a record that fails must never touch the conversation
+            logger.warning(f"voice-event {kind} not recorded")
+
     async def _bridge_while(self, ask, name: str, words: str, asked: float):
         """At most one filler per turn (SPEC-voice-v2 R4): only when the answer is not
         back after FILLER_AFTER, never for a hearing check, a count or a yes/no, and
@@ -723,9 +735,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         from events import line as event_line
         event_line("filler", text=line, heard=words[:120], ms=waited_ms)
         logger.info(f"filler after {waited_ms} ms: {line!r} for {words[:80]!r}")
-        asyncio.ensure_future(_run(director_link.director_bin(), "voice-event", "--kind", "filler",
-                                   "--thread", director_link.session_thread(), "--heard", words[:300],
-                                   "--said", line, "--ms", str(waited_ms), timeout=15, quiet=True))
+        asyncio.ensure_future(self._log_voice_event("filler", words, line, waited_ms))
         token = BRIDGING.set(True)
         try:
             await self._say(line, voice="director" if name == "Director" else "manager",

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import unittest
@@ -330,8 +331,8 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         async def slow(*argv, timeout=60, quiet=False):
             await asyncio.sleep(0.2)
             return 0, "Yes."
-        for words in ("Director, can you hear me?", "Director, how many agents are running?",
-                      "Director, is the build done?", "Director, are you there?"):
+        # (hearing checks never reach the model at all: test_a_hearing_check_is_answered_by_code_at_once)
+        for words in ("Director, how many agents are running?", "Director, is the build done?"):
             self.m._say.reset_mock()
             with patch.dict(os.environ, env), patch("manager._run", slow), patch("manager.emit", AsyncMock()), \
                     patch.object(d, "FILLER_AFTER", 0.05):
@@ -415,16 +416,39 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
         run = AsyncMock(return_value=(0, '{"reply": "Yes, I hear you."}'))
         with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()):
-            await self.m._dialogue_turn("Director, can you hear me?", None, None)
+            await self.m._dialogue_turn("Director, what's the TeamChat worker doing?", None, None)
             await self.m._dialogue_turn("Director.", None, None)
-            await self.m._dialogue_turn("are you there?", None, None)
-            self.m._follow_up_until = self.m._follow_up_until  # the window is open after a spoken answer
+            await self.m._dialogue_turn("what's ready?", None, None)
             await self.m._dialogue_turn("and the list?", None, None)
-        argvs = [c.args for c in run.await_args_list]
-        self.assertEqual(argvs[0][3], "can you hear me?")
+        argvs = [c.args for c in run.await_args_list if "ask" in c.args]
+        self.assertEqual(argvs[0][3], "what's the TeamChat worker doing?")
         self.assertIn("--named", argvs[0], "the name was heard")
         self.assertIn("--named", argvs[1], "a call, then the question")
         self.assertNotIn("--named", argvs[2], "a follow-up without the name is Director's to judge")
+
+    async def test_a_hearing_check_is_answered_by_code_at_once(self):
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        run = AsyncMock(return_value=(0, ""))
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()), \
+                patch("dialogue_manager.emit", AsyncMock()):
+            for words in ("Hello. Director, you there?", "Director?", "can you hear me?", "Hey, are you still there?"):
+                self.m._say.reset_mock()
+                await self.m._dialogue_turn(words, None, None)
+                self.assertEqual([c.args[0] for c in self.m._say.await_args_list], ["Yes, I'm here."], words)
+            await asyncio.sleep(0)
+        asked = [c.args for c in run.await_args_list if "ask" in c.args]
+        self.assertEqual(asked, [], "no model, no lookup")
+        logged = [c.args for c in run.await_args_list if "voice-event" in c.args]
+        self.assertTrue(logged and all("hearing_check" in a for a in logged))
+
+    def test_what_counts_as_a_hearing_check(self):
+        for yes in ("Hello?", "Director?", "Hello. Director, you there?", "are you there", "Tranquility, can you hear me?",
+                    "hey, you with me?"):
+            self.assertTrue(d.hearing_check(yes), yes)
+        for no in ("okay", "Director, what needs me?", "can you hear me when I whisper to the build", "hello Wispr team",
+                   "are you there yet with the fix"):
+            self.assertFalse(d.hearing_check(no), no)
 
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)
