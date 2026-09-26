@@ -1,6 +1,7 @@
 """Connect the explicit dialogue policy to the manager's existing read/speak doors."""
 
 import asyncio
+import os
 import time
 
 from loguru import logger
@@ -13,6 +14,12 @@ from dialogue_questions import build_questions, judgment_state
 from events import emit
 from exact_values import ExactValue
 from memory_manager import MemoryManagerMixin
+from turn_end import HOLD_SECS, holds_floor
+
+# A finished reply waits for his words, not for sound: with no new words for
+# this long it is spoken, whatever VAD hears (25 Sep 18:19: 27.6 s held behind
+# room sound; research/turn-taking.md R4/R6).
+FLOOR_WAIT_SECS = float(os.getenv("TB_FLOOR_WAIT_SECS", "1.5"))
 
 
 @dataclass
@@ -21,7 +28,21 @@ class TurnGuard:
     stage: str | None
 
 
+@dataclass
+class OpenTurn:
+    """The last committed turn, while its reply has not started: late speech
+    joins it (research/turn-taking.md R3). `route` is set once it is known to
+    be an ask of Director or a hand; `replying` once its reply is spoken."""
+    text: str
+    task: asyncio.Task
+    route: tuple | None = None
+    replying: bool = False
+
+
 CURRENT_TURN = ContextVar("manager_dialogue_turn", default=None)
+# Set while a delay token ("The GPU one. One sec.") is spoken: that is not the
+# reply, and speech after it still joins the turn.
+BRIDGING = ContextVar("manager_bridging", default=False)
 
 
 class DialogueManagerMixin(MemoryManagerMixin):
@@ -38,6 +59,10 @@ class DialogueManagerMixin(MemoryManagerMixin):
         self._input_ready = asyncio.Event()
         self._input_ready.set()
         self._deliveries = set()
+        self._open_turn = None
+        self._last_words = 0.0
+        self._last_words_text = ""
+        self._floor_taken = None
 
     def _current(self):
         guard = CURRENT_TURN.get()
@@ -112,15 +137,95 @@ class DialogueManagerMixin(MemoryManagerMixin):
         await emit(self, "dialogue", reason="empty_input_stopped", operation="silent")
         return True
 
-    def _schedule_dialogue(self, text, frame, direction, key=None):
+    def _schedule_dialogue(self, text, frame, direction, key=None, route=None):
         if not self.dialogue.accept(key):
             return False
         self._pause_for_input()
-        self._handler = asyncio.create_task(self._handle_turn(text, frame, direction, self._input_serial))
+        if route is None:
+            self._handler = asyncio.create_task(self._handle_turn(text, frame, direction, self._input_serial))
+        else:
+            self._handler = asyncio.create_task(
+                self._handle_turn(text, frame, direction, self._input_serial, route=route))
         self._judging = self._handler
+        self._open_turn = OpenTurn(text, self._handler)
         return True
 
-    async def _dialogue_turn(self, text, frame, direction, serial=None):
+    # -- late speech and the floor --------------------------------------------------
+
+    def words_heard(self, text: str):
+        """A transcript (interim or final) arrived: he is producing words."""
+        self._last_words = time.monotonic()
+        self._last_words_text = text or ""
+
+    def _this_turn(self):
+        turn = self._open_turn
+        return turn if turn is not None and turn.task is asyncio.current_task() else None
+
+    def _reply_starting(self):
+        if BRIDGING.get():
+            return
+        turn = self._this_turn()
+        if turn is not None:
+            turn.replying = True
+
+    def _merge_late(self, text: str):
+        """Speech committed after a turn but before its reply started joins
+        that turn: the pending ask is cancelled and re-run with both parts.
+        Returns (merged text, route) or None when the words are a turn of
+        their own. 25 Sep: "So what's on the docket? / What do I need to know?"
+        got two answers, the second 11.6 s late; "Yeah, what are all the
+        tasks? Can you expand the tranquility? / Director section so I can see
+        what's." lost its second half."""
+        import director_link
+        prior = self._open_turn
+        if (prior is None or prior.route is None or prior.replying or prior.task.done()
+                or not director_link.director_default()):
+            return None
+        own = director_link.route_default(text, follow_up=True)
+        if own is None or own[0] in {"mute", "call"}:
+            return None     # "stop" is its own turn; a bare call opens a new one
+        if own[0] == "hand" and (prior.route[0] != "hand" or own[1] != prior.route[1]):
+            return None     # names someone else
+        words = (prior.route[-1] + " " + own[-1]).strip()
+        route = prior.route[:-1] + (words,)
+        merged = (prior.text + " " + text).strip()
+        prior.task.cancel()
+        self._open_turn = None
+        logger.info(f"merged late speech into the pending turn: {prior.text[:60]!r} + {text[:60]!r}")
+        return merged, route
+
+    async def _floor_ready(self):
+        """Wait until his input is settled, but never hold a finished reply
+        behind sound that carries no words: after FLOOR_WAIT_SECS with no new
+        transcript (longer when his last words hold the floor), speak. A
+        classifier or a held fragment still in flight is always waited for."""
+        if self._input_ready.is_set() or self._floor_taken == self._input_serial:
+            return
+        start = time.monotonic()
+        while not self._input_ready.is_set():
+            now = time.monotonic()
+            judging = (getattr(self, "_held", None) is not None
+                       or (self._judging is not None and not self._judging.done()))
+            needed = (max(FLOOR_WAIT_SECS, HOLD_SECS + 0.3) if holds_floor(self._last_words_text)
+                      else FLOOR_WAIT_SECS)
+            quiet = now - max(start, self._last_words)
+            if not judging and quiet >= needed:
+                self._floor_taken = self._input_serial
+                logger.info(f"floor: reply waited {now - start:.1f} s behind hearing with no new "
+                            f"words for {quiet:.1f} s; speaking")
+                await emit(self, "dialogue", reason="floor_wait_capped", operation="speak",
+                           ms=round((now - start) * 1000), quiet_ms=round(quiet * 1000))
+                return
+            wait = 0.1 if judging else max(0.05, needed - quiet)
+            try:
+                await asyncio.wait_for(self._input_ready.wait(), timeout=wait)
+            except asyncio.TimeoutError:
+                pass
+        waited = time.monotonic() - start
+        if waited >= 0.05:
+            logger.info(f"floor: reply waited {waited:.1f} s for his turn to settle")
+
+    async def _dialogue_turn(self, text, frame, direction, serial=None, route=None):
         from manager import INTENTS, note
         if serial is None:
             self._pause_for_input()
@@ -169,9 +274,12 @@ class DialogueManagerMixin(MemoryManagerMixin):
             called = getattr(self, "_called", None)
             follow_up = (now < getattr(self, "_follow_up_until", 0.0)
                          or bool(called and now - called[1] < director_link.CALL_WINDOW))
-            routed = (director_link.route_default(text, follow_up=follow_up) if default
-                      else director_link.route(text))
-            if default and routed is not None and routed[0] != "call":
+            if route is not None:
+                routed = route      # a merged turn keeps the first part's addressee
+            else:
+                routed = (director_link.route_default(text, follow_up=follow_up) if default
+                          else director_link.route(text))
+            if default and route is None and routed is not None and routed[0] != "call":
                 routed = director_link.answer_call(routed, called, now)
                 self._called = None
             if routed is None and default:
@@ -195,6 +303,9 @@ class DialogueManagerMixin(MemoryManagerMixin):
                 settled = True
                 self._judging = None
                 self._input_ready.set()
+                turn = self._this_turn()
+                if turn is not None and routed[0] in {"ask", "hand"}:
+                    turn.route = routed
                 note("you", text, "understood")
                 self.addressed += 1
                 await emit(self, "addressed", intent="director_" + routed[0], text=text[:120])
