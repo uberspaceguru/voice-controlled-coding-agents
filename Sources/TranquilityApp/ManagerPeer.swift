@@ -57,9 +57,15 @@ final class ManagerPeer: NSObject, ManagerTransport, @unchecked Sendable {
 
     var onTrace: (@Sendable (String) -> Void)?
 
+    /// STUN for a bot across the internet; none for one on 127.0.0.1, where
+    /// host candidates are the whole story and a STUN query is only a leak.
+    private let iceServers: [String]
+
     init(signal: @escaping Signaller, toolHost: ManagerToolHost? = nil, appVersion: String = "",
+         iceServers: [String] = ["stun:stun.l.google.com:19302"],
          onRequest: @escaping RequestHandler) {
         self.signal = signal
+        self.iceServers = iceServers
         self.toolHost = toolHost
         self.appVersion = appVersion
         self.onRequest = onRequest
@@ -99,7 +105,7 @@ final class ManagerPeer: NSObject, ManagerTransport, @unchecked Sendable {
         follower.start()
         let config = LKRTCConfiguration()
         config.sdpSemantics = .unifiedPlan
-        config.iceServers = [LKRTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"])]
+        config.iceServers = iceServers.isEmpty ? [] : [LKRTCIceServer(urlStrings: iceServers)]
         let constraints = LKRTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         guard let peer = factory.peerConnection(with: config, constraints: constraints, delegate: self) else {
             throw ManagerSocketError.closed

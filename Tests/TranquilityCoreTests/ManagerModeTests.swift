@@ -94,3 +94,43 @@ final class ManagerModeTests: XCTestCase {
         XCTAssertEqual(AppIdentity.preferredScheme(among: [], channel: .test), "tranquilitybase")
     }
 }
+
+/// The local child's audio through this app's WebRTC engine: this app's own
+/// setting, off unless asked for, and never read by an app without its own
+/// folder (Prod reads hq.json, and its bot must not change).
+final class LocalManagerAudioTests: XCTestCase {
+    private func settings(_ json: String?) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("manager-\(UUID().uuidString).json")
+        if let json { try Data(json.utf8).write(to: url) }
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func testOffUnlessAskedFor() throws {
+        XCTAssertEqual(ManagerConfig.localAudio(settings: try settings(nil), ownFolder: true), .child)
+        XCTAssertEqual(ManagerConfig.localAudio(settings: try settings("{}"), ownFolder: true), .child)
+        XCTAssertEqual(ManagerConfig.localAudio(settings: try settings(#"{"audio":"loud"}"#), ownFolder: true), .child)
+        XCTAssertEqual(ManagerConfig.localAudio(settings: try settings("not json"), ownFolder: true), .child)
+    }
+
+    func testOnWhenAskedForInAnAppWithItsOwnFolder() throws {
+        XCTAssertEqual(ManagerConfig.localAudio(settings: try settings(#"{"audio":"webrtc"}"#), ownFolder: true), .webrtc)
+        XCTAssertEqual(ManagerConfig.localAudio(settings: try settings(#"{"audio":"WebRTC"}"#), ownFolder: true), .webrtc)
+    }
+
+    func testAnAppWithoutItsOwnFolderNeverReadsIt() throws {
+        XCTAssertEqual(ManagerConfig.localAudio(settings: try settings(#"{"audio":"webrtc"}"#), ownFolder: false), .child)
+    }
+
+    func testTheChildIsToldWhereAndHow() {
+        let env = ManagerConfig.localWebRTCEnvironment(port: 50123, token: "tok")
+        XCTAssertEqual(env, ["TB_AUDIO": "webrtc", "TB_WEBRTC_PORT": "50123", "TB_WEBRTC_TOKEN": "tok"])
+        XCTAssertNil(ManagerConfig.environment(base: [:])["TB_AUDIO"], "the default child keeps its own audio")
+    }
+
+    func testAFreeLoopbackPort() throws {
+        let port = try XCTUnwrap(ManagerConfig.freeLoopbackPort())
+        XCTAssertTrue((1024..<65536).contains(port))
+    }
+}

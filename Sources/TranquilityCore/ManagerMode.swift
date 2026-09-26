@@ -201,4 +201,67 @@ public enum ManagerConfig {
         env["PATH"] = (extra + (env["PATH"] ?? "").split(separator: ":").map(String.init)).joined(separator: ":")
         return env
     }
+
+    /// How a LOCAL manager (a `manager.command` child) hears and speaks.
+    ///
+    /// `.child` is how it always was: the bot opens the Mac's microphone and
+    /// speakers itself, with no echo canceller, so it mutes the microphone
+    /// while it speaks and cannot be interrupted. `.webrtc` keeps the same
+    /// child (same launcher, same event lines, same commands) and moves only
+    /// the audio into this app's WebRTC engine on 127.0.0.1, the one a hosted
+    /// manager already uses, which cancels the bot's voice out of the
+    /// microphone so it can be talked over (tb-voice/server/local_rtc.py).
+    ///
+    /// This app's own setting, never hq.json: Prod reads hq.json too, and
+    /// its bot must not change. `manager.json` in the app's own data folder,
+    /// `{"audio": "webrtc"}`, honoured only by an app that has its own folder
+    /// (Tranquility Base Director); anything else is `.child`.
+    public enum LocalAudio: String, Sendable, Equatable { case child, webrtc }
+
+    public static var localSettingsPath: URL {
+        QueueStore.supportDirectory.appendingPathComponent("manager.json")
+    }
+
+    public static func localAudio(settings: URL = localSettingsPath,
+                                  ownFolder: Bool = AppIdentity.supportFolderName != nil) -> LocalAudio {
+        guard ownFolder,
+              let data = try? Data(contentsOf: settings),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = obj["audio"] as? String,
+              let audio = LocalAudio(rawValue: raw.lowercased()) else { return .child }
+        return audio
+    }
+
+    /// The child's extra environment when its audio is this app's WebRTC
+    /// engine: where to answer the offer, and the token the offer carries so
+    /// no other process on this Mac can take the microphone's place.
+    public static func localWebRTCEnvironment(port: Int, token: String) -> [String: String] {
+        ["TB_AUDIO": LocalAudio.webrtc.rawValue, "TB_WEBRTC_PORT": String(port), "TB_WEBRTC_TOKEN": token]
+    }
+
+    /// A port on 127.0.0.1 nobody is listening on right now, for the child's
+    /// signalling server. Bound and released here; the child binds it a moment
+    /// later, and a lost race shows as a failed start in the log.
+    public static func freeLoopbackPort() -> Int? {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else { return nil }
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+        }
+        guard named == 0 else { return nil }
+        return Int(UInt16(bigEndian: addr.sin_port))
+    }
 }
