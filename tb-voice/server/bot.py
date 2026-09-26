@@ -47,6 +47,15 @@ from turn_end import ForecastGradiumSTTService, ForecastTurnStopStrategy
 from words_tap import WordsTap
 
 
+def _idle_timeout() -> float | None:
+    raw = os.getenv("TB_IDLE_TIMEOUT_SECS")
+    if raw is not None:
+        return float(raw) or None
+    if os.getenv("TB_DEFAULT_INTERLOCUTOR", "").strip().lower() == "director":
+        return None
+    return 300.0
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     logger.info("Starting tb-voice")
     # The Director app's WebRTC audio (local_rtc.py) arrives with the bot's own
@@ -148,6 +157,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        # Director's hands-free stays on while it watches the fleet (26 Sep): the library's 5-minute idle
+        # timeout ended the session whenever Ahmed stepped away, and he came back to a dead voice. Elsewhere
+        # the default stands; TB_IDLE_TIMEOUT_SECS overrides (0 = never).
+        idle_timeout_secs=_idle_timeout(),
     )
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
     await runner.add_workers(worker)
