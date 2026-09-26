@@ -358,6 +358,7 @@ class Manager(DialogueManagerMixin, FrameProcessor):
 
     async def hearing(self):
         """The user started speaking: the orb shows it before any verdict."""
+        self._last_heard = time.monotonic()
         self._pause_for_input()
         await emit(self, "hearing")
 
@@ -371,6 +372,9 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         if isinstance(frame, StartFrame):
             # The pipeline is running and the mic is open: now it is listening.
             await emit(None, "ready")
+            import director_link
+            if director_link.director_default() and getattr(self, "_lookup_watch", None) is None:
+                self._lookup_watch = asyncio.create_task(self._watch_lookups())
         if isinstance(frame, BotStoppedSpeakingFrame):
             # Generic stop has no context ID: orb state only, never delivery proof.
             await emit(None, "quiet")  # the manager's voice stopped; the orb goes back to rest
@@ -642,6 +646,37 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             await self._answer_on_card(hand, name, line)
         else:
             await self._say(line, response_mode="receipt")
+
+    async def _watch_lookups(self, *, once: bool = False):
+        """Director's promises coming back. A finished lookup is pre-announced at a
+        pause while a conversation is open ("Hey, about the GPU one: that's ready.
+        Want to go through it now?"), and the conversation stays open so a plain
+        "yes" reaches Director, which then tells it. With no conversation open
+        it chimes once; Director's tick puts it on the card after a minute."""
+        import director_link
+        chimed: set = set()
+        while True:
+            await asyncio.sleep(director_link.LOOKUP_POLL_S)
+            try:
+                code, out = await _run(director_link.director_bin(), "--json", "lookups", "--ready", timeout=15)
+                ready = (json.loads(out).get("ready") or []) if code == 0 else []
+            except Exception:  # noqa: BLE001 - a poll that fails is retried on the next one
+                ready = []
+            for lookup in ready:
+                now = time.monotonic()
+                open_ = now < getattr(self, "_follow_up_until", 0.0)
+                quiet = (now - getattr(self, "_last_heard", 0.0) > director_link.QUIET_BEFORE_ANNOUNCE_S
+                         and not self._voice.locked())
+                if open_ and quiet:
+                    await self._say(director_link.ready_line(lookup), voice="director", response_mode="receipt")
+                    await _run(director_link.director_bin(), "lookup-announced", str(lookup["id"]), timeout=15)
+                    self._follow_up_until = time.monotonic() + director_link.FOLLOW_UP_SECS
+                    break                                  # one announcement per pause
+                if not open_ and lookup["id"] not in chimed:
+                    chimed.add(lookup["id"])
+                    await self._earcon("returned")
+            if once:
+                return
 
     async def _bridge_while(self, ask, name: str, words: str, asked: float):
         """While the answer is on its way, announce the delay instead of leaving

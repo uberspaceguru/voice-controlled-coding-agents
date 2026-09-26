@@ -217,6 +217,22 @@ def bridge(kind: str, words: str, last: str | None = None) -> str:
     return next(t for t in options if t != last)
 
 
+# Lookups (Director's promises, lookups.py): polled while hands-free runs; a
+# finished one is pre-announced at a pause while a conversation is open, so he
+# chooses when to hear it (Ahmed, 25 Sep: "this thing we were talking about is
+# now ready; do you want to talk about it whenever you're ready?").
+LOOKUP_POLL_S = 4.0
+QUIET_BEFORE_ANNOUNCE_S = 1.5
+
+
+def ready_line(lookup: dict) -> str:
+    about = re.split(r"\s+\(agent\s", (lookup.get("about") or lookup.get("question") or "what you asked"))[0].strip()
+    about = about.rstrip("?.! ")
+    if lookup.get("result"):
+        return f"Hey, about {about}: that's ready. Want to go through it now?"
+    return f"About {about}: I couldn't find that out. Want to hear what I got?"
+
+
 def director_default() -> bool:
     """The host talks to Director by default (the Director app)."""
     return os.getenv("TB_DEFAULT_INTERLOCUTOR", "").strip().lower() == "director"

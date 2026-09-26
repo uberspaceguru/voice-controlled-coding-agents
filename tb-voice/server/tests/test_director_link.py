@@ -323,6 +323,34 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d.bridge("long", "what about the TeamChat desktop one?"), "Let me look at the TeamChat desktop one.")
         self.assertNotEqual(d.bridge("long", "anything", "Let me look into that."), "Let me look into that.")
 
+    async def test_a_finished_lookup_is_announced_at_a_pause_while_the_conversation_is_open(self):
+        import json as _json
+        import time as _time
+        from unittest.mock import AsyncMock, patch
+        ready = {"ready": [{"id": 7, "about": "the TeamChat desktop one (agent w-a21: TeamChat desktop)",
+                            "question": "what is it waiting for?", "result": "It waits for your yes."}]}
+        run = AsyncMock(side_effect=[(0, _json.dumps(ready)), (0, "")])
+        self.m._earcon = AsyncMock()
+        self.m._follow_up_until = _time.monotonic() + 30
+        self.m._last_heard = 0.0
+        with patch("manager._run", run), patch.object(d, "LOOKUP_POLL_S", 0):
+            await self.m._watch_lookups(once=True)
+        self.assertEqual(self.m._say.await_args.args[0],
+                         "Hey, about the TeamChat desktop one: that's ready. Want to go through it now?")
+        self.assertEqual(run.await_args_list[1].args[1:], ("lookup-announced", "7"))
+        self.m._earcon.assert_not_awaited()
+
+    async def test_with_no_conversation_open_a_finished_lookup_only_chimes_once(self):
+        import json as _json
+        from unittest.mock import AsyncMock, patch
+        ready = _json.dumps({"ready": [{"id": 8, "about": "the GPU one", "result": "x"}]})
+        self.m._earcon = AsyncMock()
+        self.m._follow_up_until = 0.0
+        with patch("manager._run", AsyncMock(return_value=(0, ready))), patch.object(d, "LOOKUP_POLL_S", 0):
+            await self.m._watch_lookups(once=True)
+        self.m._say.assert_not_awaited()
+        self.m._earcon.assert_awaited_once_with("returned")
+
     async def test_a_placeholder_says_so(self):
         await self.m._dialogue_turn("TeamChat Manager, anything?", None, None)
         self.assertEqual(self.m._say.await_args.args[0], "TeamChat Manager isn't connected yet.")
