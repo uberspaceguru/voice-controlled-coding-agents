@@ -203,7 +203,7 @@ class OverTheVoice(unittest.IsolatedAsyncioTestCase):
             epoch = self.m.dialogue.epoch
             self.m.barged_in()
             await self.m._dialogue_turn("no the other one", None, None)
-        self.assertEqual(run.await_args_list[-1].args[2], "no the other one")
+        self.assertEqual(run.await_args_list[-1].args[3], "no the other one")
         self.assertNotEqual(self.m.dialogue.epoch, epoch)
 
     async def test_the_same_words_in_the_quiet_change_nothing(self):
