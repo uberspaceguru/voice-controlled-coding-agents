@@ -117,11 +117,62 @@ extension AppDelegate {
 
     static let conversationIdleSecs: TimeInterval = 60
 
+    /// Director's card thread: the session its voice and its taps ask in.
+    var directorThread: String? {
+        guard let hands = RightHands.current(),
+              let director = hands.order.first(where: { hands.names[$0] == "Director" }) else { return nil }
+        return hands.hands[director]?.session ?? director
+    }
+
+    /// A door on the card's payload (M26). Go to Agent and Answer open the
+    /// agent's pane in Ghostty; Approve sends Director one explicit yes for
+    /// what the card shows, in the card's thread, and shows (does not speak:
+    /// the voice is the pipeline's) the answer and its next card.
+    func cardDoor(_ door: CardPayload.Door) {
+        switch door {
+        case .goTo(let agent), .answer(let agent):
+            Task.detached(priority: .userInitiated) { [weak self] in
+                let outcome = GhosttyDoor.open(tmuxSession: agent)
+                await MainActor.run { [weak self] in
+                    Permissions.log("hands-free: card door \(door.id): \(outcome)")
+                    if case .opened = outcome { return }
+                    self?.hud.showResult("\(agent) has no screen to open right now.")
+                }
+            }
+        case .approve:
+            guard !cardApproving, let text = hud.cardPayload?.approveText, let thread = directorThread else { return }
+            cardApproving = true
+            Permissions.log("hands-free: card approve: \(text.prefix(100))")
+            hud.acknowledge(.recognized)
+            Task.detached(priority: .userInitiated) { [weak self] in
+                let result = CardPayload.ask(text, thread: thread)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.cardApproving = false
+                    switch result {
+                    case .success(let answer):
+                        Permissions.log("hands-free: approval answered: \(answer.reply.prefix(120))")
+                        self.hud.setCardPayload(CardPayload.parse(json: answer.card))
+                        if self.hud.conversationCard {
+                            self.noteConversation(answer.reply.isEmpty ? "Sent to Director." : answer.reply)
+                        } else {
+                            self.hud.showResult(answer.reply.isEmpty ? "Sent to Director." : answer.reply)
+                        }
+                    case .failure(let why):
+                        Permissions.log("hands-free: approval failed: \(why)")
+                        self.hud.showResult("Director didn't take the approval just now.")
+                    }
+                }
+            }
+        }
+    }
+
     func endConversationCard() {
         conversationIdle?.cancel()
         conversationIdle = nil
         guard hud.conversationCard else { return }
         hud.conversationCard = false
+        hud.setCardPayload(nil)
         Permissions.log("hands-free: a minute without a turn; the list again")
         showIdleGrid()
     }
@@ -844,6 +895,12 @@ extension AppDelegate {
             // and synthesizes nothing (the silent-answers bug, 25 Sep 17:01).
             Permissions.log("manager: answer from \(name) for \(session.prefix(8)); playing it on the card")
             speakOnCard(text, as: session, name: name, force: true)
+        case .card:
+            // M26: what Director's card shows with the sentence that follows.
+            // Every Director turn sends one; an empty one clears the last.
+            let payload = CardPayload.parse(json: e.card)
+            Permissions.log("hands-free: card payload \(payload.map { "\($0)".prefix(24).description } ?? "none")")
+            hud.setCardPayload(payload)
         case .ask:
             // "Yobi1, what's on today?" (25 Sep): the hand's brain answers and
             // the answer is spoken on the hand's own card, as a tapped reply is.

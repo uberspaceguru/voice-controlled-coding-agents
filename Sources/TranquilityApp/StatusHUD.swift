@@ -2497,6 +2497,7 @@ final class StatusHUD: NSObject {
         gridFooter.isHidden = true; controlsSticky.isHidden = true; voiceSticky.isHidden = true
         stripLabel.stringValue = ""
         voiceList.isHidden = true; waitingRows.isHidden = true
+        cardPayloadView?.isHidden = true
         setupChecklist?.isHidden = true; setupScroll?.isHidden = true
         pastList?.isHidden = true
         pastBackButton?.isHidden = true
@@ -2564,6 +2565,7 @@ final class StatusHUD: NSObject {
             if conversationCard && managerOn {
                 rebuildConversationRows()
                 waitingRows.isHidden = false
+                showCardPayload()
             }
 
         case .idle where face.grid:
@@ -3410,6 +3412,40 @@ final class StatusHUD: NSObject {
     /// card, not the list (26 Sep, Ahmed: the list during a conversation is
     /// useless). Set by the app; the list comes back after 60 s of silence.
     var conversationCard = false
+
+    /// What the conversation card draws under the sentence (M26): the last
+    /// Director turn's payload, until the next turn replaces or clears it.
+    private(set) var cardPayload: CardPayload?
+    /// Under the sentence, hidden unless the conversation card is up with a payload.
+    var cardPayloadView: NSStackView!
+    /// The payload the view was built for: it is rebuilt when that changes,
+    /// never on a render (a rebuild under the pointer would eat a press).
+    private var builtCardPayload: CardPayload?
+
+    func setCardPayload(_ payload: CardPayload?) {
+        guard payload != cardPayload else { return }
+        cardPayload = payload
+        if conversationCard { render() }
+    }
+
+    private func showCardPayload() {
+        guard let cardPayload else { return }
+        if builtCardPayload != cardPayload {
+            cardPayloadView.removeAllArrangedSubviews()
+            for view in CardPayloadRows.build(cardPayload, target: self, action: #selector(cardDoorTapped(_:))) {
+                cardPayloadView.addArrangedSubview(view)
+            }
+            builtCardPayload = cardPayload
+        }
+        cardPayloadView.isHidden = false
+    }
+
+    @objc nonisolated func cardDoorTapped(_ sender: NSControl) {
+        MainActor.assumeIsolated {
+            guard let id = sender.identifier?.rawValue else { return }
+            onPickWaiting?(id)
+        }
+    }
 
     /// On the conversation card: the orb, above the sentence.
     private func rebuildConversationRows() {

@@ -33,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var managedCredits: ManagedCreditSession?
     /// Hands-free's conversation card: when it goes back to the list.
     var conversationIdle: DispatchWorkItem?
+    /// An Approve from the conversation card is in flight (M26): one at a time.
+    var cardApproving = false
     /// The voice and the transcript, bought on the account. Held so the
     /// transcription session can be ended when the microphone closes.
     var managedAudio: ManagedAudio?

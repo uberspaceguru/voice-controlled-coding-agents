@@ -139,12 +139,15 @@ extension StatusHUD {
         // The right-hands panel with Director open (25 Sep): four hands, and
         // the accordion drawn by the same Core builder the app uses, so this
         // picture is the rendering Ahmed gets, with Director's words in it.
-        case "handsfree-conversation":
+        case "handsfree-conversation", "handsfree-conversation-list", "handsfree-conversation-item",
+             "handsfree-conversation-action", "handsfree-conversation-screen":
             // tb-handsfree-transition (26 Sep): in a conversation the panel is
             // Director's card, the orb and STOP HANDS-FREE under the sentence.
+            // M26: the -list/-item/-action/-screen poses add the turn's payload.
             setManager(on: true)
             setManagerState(Self.orbState, line: "speaking", mood: "speaking")
             conversationCard = true
+            setCardPayload(CardPayload.parse(json: Self.payloadPoses[name]))
             let line = "Ten things need you; first, the Jev pilot worker needs approval to send private repo metadata."
             let spoken = SpokenTextSanitizer().sanitize(line, allowing: ["Director", "Jev"])
             _ = showAnnouncement(spoken: spoken, sessionId: "ac03daf5-bd0a-42a7-91b2-fe789e3f8a1a", pid: nil,
@@ -499,6 +502,14 @@ extension StatusHUD {
     /// (screencapture returned solid black against a sleeping panel lid,
     /// 13 Aug, which is how this came to exist). PNG bytes, or nil when no
     /// panel is up.
+    /// The conversation card's payloads (M26), one per kind.
+    static let payloadPoses: [String: String] = [
+        "handsfree-conversation-list": #"{"kind":"list","title":"What needs you","rows":[{"n":1,"project":"Jev pilot","title":"approval to send private repo metadata","age":"12 min","agent":"w-a22"},{"n":2,"project":"YobiWispr","title":"run this command for YobiWispr?","age":"3 h","agent":"w-a20-2"},{"n":3,"project":"TeamChat","title":"switch model for TeamChat iOS?","age":"yesterday","agent":"w-a21"}]}"#,
+        "handsfree-conversation-item": #"{"kind":"item","n":1,"project":"Jev pilot","title":"send private repo metadata","question":"The Jev pilot worker wants to send the private repository's file list and commit messages (no file contents) to the hosted Jev model to rank the pilot's test cases. Approve?","agent":"w-a22","reply":"approve","action_id":14}"#,
+        "handsfree-conversation-action": #"{"kind":"action","id":12,"what":"Restart the TeamChat desktop worker with approvals off","state":"in_progress","target":"w-a21","started_at":1790436000000}"#,
+        "handsfree-conversation-screen": #"{"kind":"screen","agent":"w-a21","lines":["$ swift test --filter DesktopRefresh","Building for debugging...","[412/418] Compiling TeamChatDesktop RefreshController.swift","Build complete! (38.12s)","Test Suite 'DesktopRefreshTests' started","Test Case 'testRefreshKeepsScroll' passed (0.021 seconds)","Test Case 'testRefreshAfterSleep' passed (0.114 seconds)","Executed 2 tests, with 0 failures (0 unexpected) in 0.135 seconds","","⏺ Both refresh tests pass. Want me to open a PR against teamchat/main?"]}"#,
+    ]
+
     func poseSnapshot() -> Data? {
         guard let view = panel?.contentView else { return nil }
         view.layoutSubtreeIfNeeded()

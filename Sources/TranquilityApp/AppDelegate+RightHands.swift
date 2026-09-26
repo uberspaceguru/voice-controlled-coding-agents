@@ -13,6 +13,10 @@ extension AppDelegate {
     /// not a right-hand or one of its lines goes on to `announceNext(only:)`
     /// exactly as before.
     func pick(_ id: String) {
+        if let door = CardPayload.Door(id: id) {
+            cardDoor(door)
+            return
+        }
         if let (parent, part) = RightHands.Accordion.part(of: id) {
             openLine(part, of: parent)
             return
