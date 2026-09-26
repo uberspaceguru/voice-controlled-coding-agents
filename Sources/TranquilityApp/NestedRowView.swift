@@ -172,3 +172,94 @@ final class MoreButton: NSButton {
 
     override func resetCursorRects() { super.resetCursorRects(); addCursorRect(bounds, cursor: .pointingHand) }
 }
+
+/// A pending action on the Director card (25 Sep night): the title on the
+/// first line; its state as a chip, then Approve (only while it waits on him)
+/// and Go to Agent (when it names an agent) on the second. The row itself does
+/// nothing when tapped: long work is read here, never spoken; only the two
+/// doors act, and each does one thing.
+final class ActionRowView: NSView {
+    init(item: SessionRow, target: AnyObject, action: Selector) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        identifier = NSUserInterfaceItemIdentifier(item.id)
+        toolTip = item.name
+
+        let dot = NSTextField(labelWithString: StateLegend.Glyph.dot)
+        dot.font = ChromeType.mono(ofSize: 9, weight: .regular)
+        dot.textColor = Self.ink(item.lamp)
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dot.setContentHuggingPriority(.required, for: .horizontal)
+
+        let title = NSTextField(labelWithString: item.name)
+        title.font = NestedRowView.font
+        title.textColor = item.lamp == .unlit ? StateLegend.Palette.secondary : StateLegend.Palette.ink
+        title.lineBreakMode = .byTruncatingTail
+        title.maximumNumberOfLines = 1
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        let chip = NSTextField(labelWithString: item.aux)
+        chip.font = ChromeType.mono(ofSize: 11, weight: .regular)
+        chip.textColor = Self.ink(item.lamp)
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let doors = NSStackView()
+        doors.orientation = .horizontal
+        doors.spacing = 10
+        doors.translatesAutoresizingMaskIntoConstraints = false
+        doors.addArrangedSubview(chip)
+        if item.lamp == .ready, let (parent, part) = RightHands.Accordion.part(of: item.id), case .action(let n) = part {
+            doors.addArrangedSubview(Self.door("Approve", id: RightHands.Accordion.id(parent, .approve(n)),
+                                               ink: StateLegend.Palette.fault, target: target, action: action))
+        }
+        if let agent = item.detail, !agent.isEmpty,
+           let (parent, part) = RightHands.Accordion.part(of: item.id), case .action(let n) = part {
+            doors.addArrangedSubview(Self.door("Go to Agent", id: RightHands.Accordion.id(parent, .goTo(n)),
+                                               ink: StateLegend.Palette.secondary, target: target, action: action))
+        }
+
+        addSubview(dot); addSubview(title); addSubview(doors)
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: NestedRowView.indent),
+            dot.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
+            title.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 6),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            title.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            // Under the dot, not the title: the chip and both doors need the width.
+            doors.leadingAnchor.constraint(equalTo: dot.leadingAnchor),
+            doors.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            doors.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
+            doors.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// The state's ink: waiting on him the panel's needs-you green, in
+    /// progress advisory blue, failed amber, queued and done quiet.
+    static func ink(_ lamp: Lamp) -> NSColor {
+        switch lamp {
+        case .ready: return StateLegend.Palette.ready
+        case .working: return StateLegend.Palette.working
+        case .fault: return StateLegend.Palette.fault
+        default: return StateLegend.Palette.hint
+        }
+    }
+
+    private static func door(_ title: String, id: String, ink: NSColor, target: AnyObject,
+                             action: Selector) -> NSButton {
+        let b = NSButton(title: title, target: target, action: action)
+        b.identifier = NSUserInterfaceItemIdentifier(id)
+        b.isBordered = false
+        b.setButtonType(.momentaryChange)
+        b.attributedTitle = NSAttributedString(string: title + " ›", attributes: [
+            .font: ChromeType.mono(ofSize: 11, weight: .medium), .foregroundColor: ink])
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return b
+    }
+}

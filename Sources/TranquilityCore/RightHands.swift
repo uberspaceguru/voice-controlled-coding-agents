@@ -59,10 +59,15 @@ public enum RightHands {
         /// (`["director", "--json", "ready"]`, 25 Sep): its items join the
         /// card as "ready" lines, never counted as needing the user.
         public var ready: [String]?
+        /// A command that prints the hand's pending actions (`["director",
+        /// "--json", "actions"]`, 25 Sep): long work, shown on the card with
+        /// its state, never narrated by voice.
+        public var actions: [String]?
 
         public init(name: String? = nil, session: String? = nil, cwd: String? = nil,
                     tmux: String? = nil, rollup: String? = nil,
-                    projects: [String]? = nil, ask: [String]? = nil, ready: [String]? = nil) {
+                    projects: [String]? = nil, ask: [String]? = nil, ready: [String]? = nil,
+                    actions: [String]? = nil) {
             self.name = name
             self.session = session
             self.cwd = cwd
@@ -71,6 +76,7 @@ public enum RightHands {
             self.projects = projects
             self.ask = ask
             self.ready = ready
+            self.actions = actions
         }
 
         /// A hand named in the file with nothing to find it by yet: "TeamChat
@@ -284,7 +290,7 @@ public enum RightHands {
                                   cwd: string("cwd"), tmux: string("tmux"),
                                   rollup: string("rollup"),
                                   projects: argv("projects"), ask: argv("ask"),
-                                  ready: argv("ready")))
+                                  ready: argv("ready"), actions: argv("actions")))
             } else {
                 return .failure(.wrongShape("entry \(index) is neither an object nor a string"))
             }
@@ -443,6 +449,10 @@ public enum RightHands {
                case .success(let out) = Subprocess.run(program, Array(ready.dropFirst()), timeout: 20) {
                 rollup.items += Rollup.readyItems(Data(out.utf8))
             }
+            if let argv = hand.actions, !argv.isEmpty, let program = executable(argv[0]),
+               case .success(let out) = Subprocess.run(program, Array(argv.dropFirst()), timeout: 20) {
+                rollup.actions = PendingActions.parse(Data(out.utf8)) ?? []
+            }
             return rollup
         }
         guard let path = hand.rollup else { return nil }
@@ -569,6 +579,9 @@ public enum RightHands {
         public var moving: Bool
         /// The sessions Director says are working, by session id.
         public var workingSessions: Set<String>
+        /// Director's pending actions (its `actions` command): the card's
+        /// "Actions" block, one row each with its state.
+        public var actions: [PendingActions.Action] = []
 
         public init(projects: [Project], updatedAt: String? = nil, totals: String? = nil,
                     needsYou: Int? = nil, needsSessions: Set<String> = [],
@@ -821,6 +834,8 @@ public enum RightHands {
         /// `<parent>#item-<n>`, `<parent>#more`. Parsed back by `part(of:)`.
         public enum Part: Equatable, Sendable {
             case summary, item(Int), more
+            /// A pending action's row, its Approve button, its Go to Agent link.
+            case action(Int), approve(Int), goTo(Int)
         }
 
         public static func id(_ parent: String, _ part: Part) -> String {
@@ -828,6 +843,9 @@ public enum RightHands {
             case .summary: return parent + "#summary"
             case .item(let n): return parent + "#item-\(n)"
             case .more: return parent + "#more"
+            case .action(let n): return parent + "#action-\(n)"
+            case .approve(let n): return parent + "#approve-\(n)"
+            case .goTo(let n): return parent + "#goto-\(n)"
             }
         }
 
@@ -838,8 +856,11 @@ public enum RightHands {
             case "summary": return (parent, .summary)
             case "more": return (parent, .more)
             default:
-                guard tail.hasPrefix("item-"), let n = Int(tail.dropFirst(5)) else { return nil }
-                return (parent, .item(n))
+                for (prefix, make) in [("item-", Part.item), ("action-", Part.action),
+                                       ("approve-", Part.approve), ("goto-", Part.goTo)] {
+                    if tail.hasPrefix(prefix), let n = Int(tail.dropFirst(prefix.count)) { return (parent, make(n)) }
+                }
+                return nil
             }
         }
 
@@ -980,7 +1001,26 @@ public enum RightHands {
                                       lamp: .running, read: .opened, hasRecordedTurn: true)
                     .placed(pinned: false, parentId: parent))
             }
+            // The Actions block (25 Sep): long work lives on the card, with its state as a chip (aux), its
+            // agent as the detail, and its state as the lamp the row view reads (Approve only when it waits on him).
+            for a in PendingActions.shown(card.actions) {
+                out.append(SessionRow(id: id(parent, .action(a.id)), name: a.what, aux: PendingActions.chip(a),
+                                      lamp: actionLamp(a.state), read: .none, detail: a.target ?? "",
+                                      hasRecordedTurn: true)
+                    .placed(pinned: false, parentId: parent))
+            }
             return out
+        }
+
+        /// A pending action's state as the lamp its row wears.
+        public static func actionLamp(_ state: PendingActions.Action.State) -> Lamp {
+            switch state {
+            case .awaitingAhmed: return .ready
+            case .inProgress: return .working
+            case .queued: return .running
+            case .done: return .unlit
+            case .failed: return .fault
+            }
         }
     }
 

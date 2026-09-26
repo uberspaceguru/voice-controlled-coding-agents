@@ -139,3 +139,61 @@ final class RightHandsIndicatorTests: XCTestCase {
                        "Yobi1 email: Jev shadow triage, commitments and waiting-on…")
     }
 }
+
+/// Pending actions on the Director card (25 Sep night): long work, read on the card, never spoken.
+final class PendingActionsTests: XCTestCase {
+    private let json = """
+    {"actions": [
+      {"id": 12, "what": "Restart the TeamChat desktop worker with approvals off", "state": "awaiting_ahmed",
+       "target": "w-a21", "item_id": "A21", "requested_at": 1790380800000},
+      {"id": 11, "what": "Find out what the GPU worker is stuck on", "state": "in_progress", "target": "w-a18",
+       "requested_at": 1790380200000, "started_at": 1790380210000},
+      {"id": 9, "what": "Stage the Wispr fix", "state": "done", "finished_at": 1790379600000},
+      {"id": 8, "what": "", "state": "done"},
+      {"id": 7, "what": "Something", "state": "exploded"}
+    ]}
+    """
+
+    func testParseChipAndOrder() throws {
+        let actions = try XCTUnwrap(PendingActions.parse(Data(json.utf8)))
+        XCTAssertEqual(actions.map(\.id), [12, 11, 9], "rows with no words or an unknown state are skipped")
+        let clock: (Date) -> String = { _ in "21:04" }
+        XCTAssertEqual(actions.map { PendingActions.chip($0, clock: clock) },
+                       ["awaiting your approval", "in progress since 21:04", "done at 21:04"])
+        XCTAssertEqual(PendingActions.shown(actions.reversed()).map(\.id), [12, 11, 9],
+                       "waiting on him first, then in progress, then finished")
+        XCTAssertEqual(PendingActions.parse(Data("[]".utf8)), [])
+        XCTAssertNil(PendingActions.parse(Data("not json".utf8)))
+    }
+
+    func testApproveSendsOneExplicitYesForThatActionOnly() throws {
+        let a = try XCTUnwrap(PendingActions.parse(Data(json.utf8))?.first)
+        XCTAssertEqual(PendingActions.approveArgv(a, thread: "ac03"),
+                       ["director", "--json", "ask",
+                        "Yes, I approve action 12: Restart the TeamChat desktop worker with approvals off (A21).",
+                        "--named", "--channel", "tranquility", "--external-id", "ac03"])
+        var ran: [[String]] = []
+        let r = PendingActions.approve(a, thread: "ac03") { _, args, _ in
+            ran.append(args); return .success(#"{"reply": "Approved; restarting it."}"#)
+        }
+        XCTAssertEqual(try r.get(), "Approved; restarting it.")
+        XCTAssertEqual(ran.count, 1)
+        var done = a; done.state = .done
+        if case .success = PendingActions.approve(done, thread: "ac03", run: { _, _, _ in .success("") }) {
+            XCTFail("only an action waiting on him can be approved")
+        }
+    }
+
+    func testActionsAreRowsWithDoorsUnderTheHand() {
+        var card = RightHands.Rollup(projects: [], needsYou: 0, panelSummary: "Nothing needs you.")
+        card.actions = PendingActions.parse(Data(json.utf8)) ?? []
+        let rows = RightHands.Accordion.rows(parent: "d", card: card)
+        let acts = rows.filter { if case .action = RightHands.Accordion.part(of: $0.id)?.part { return true }; return false }
+        XCTAssertEqual(acts.map(\.name).first, "Restart the TeamChat desktop worker with approvals off")
+        XCTAssertEqual(acts.map(\.lamp), [.ready, .working, .unlit])
+        XCTAssertEqual(acts.first?.detail, "w-a21")
+        for part in [RightHands.Accordion.Part.action(12), .approve(12), .goTo(12)] {
+            XCTAssertEqual(RightHands.Accordion.part(of: RightHands.Accordion.id("d", part))?.part, part)
+        }
+    }
+}

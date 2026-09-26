@@ -176,9 +176,18 @@ extension StatusHUD {
                     .init(line: "React web app: GTM call queue in React", kind: .ready),
                     .init(line: "Yobi1: connect one real decision end to end", kind: .ready),
                     .init(line: "w-a3: waiting on w-a2's merge", kind: .blocked)])
+            var withActions = card
+            let at = { (hhmm: Double) in Date(timeIntervalSince1970: 1_790_380_800 + hhmm) }
+            withActions.actions = [
+                .init(id: 12, what: "Restart the TeamChat desktop worker with approvals off", state: .awaitingAhmed,
+                      target: "w-a21", itemId: "A21", requestedAt: at(0)),
+                .init(id: 11, what: "Find out what the GPU worker is stuck on", state: .inProgress,
+                      target: "w-a18", requestedAt: at(-600), startedAt: at(-590)),
+                .init(id: 9, what: "Stage the Wispr insertion fix", state: .done, target: "w-a20-2",
+                      requestedAt: at(-3600), finishedAt: at(-1200))]
             showIdle(rows: [SessionRow(id: director, name: "Director", aux: "", lamp: .ready,
                                        read: .unread, hasRecordedTurn: true).placed(pinned: true)]
-                + RightHands.Accordion.rows(parent: director, card: card, all: true)
+                + RightHands.Accordion.rows(parent: director, card: withActions, all: true)
                 + [SessionRow(id: "y1", name: "Yobi1", aux: "", lamp: .working, read: .none,
                               hasRecordedTurn: true).placed(pinned: true),
                    SessionRow(id: "s3", name: "Sys-3PO", aux: "", lamp: .running,

@@ -118,6 +118,55 @@ extension AppDelegate {
             showIdleGrid()
         case .summary:
             askBrain("what needs me?", of: parent, name: name)
+        case .action(let n):
+            // The row reads; only its doors act (long work is read, never spoken).
+            Permissions.log("right-hands: \(name) action \(n) tapped; nothing to do but read it")
+        case .approve(let n):
+            approveAction(n, of: parent, name: name)
+        case .goTo(let n):
+            goToActionAgent(n, of: parent)
+        }
+    }
+
+    /// Approve (25 Sep night): the one explicit yes for that action and nothing
+    /// else, in the hand's thread; Director's reply is shown, not spoken, and
+    /// the card is read again so the chip moves.
+    private func approveAction(_ n: Int, of parent: String, name: String) {
+        guard let card = RightHands.CardCache.shared.card(for: parent),
+              let action = card.actions.first(where: { $0.id == n }) else { return }
+        let hand = RightHands.hand(for: parent)
+        let thread = hand?.session ?? parent
+        Permissions.log("right-hands: \(name) action \(n) approved: \(action.what.prefix(80))")
+        hud.acknowledge(.recognized)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = PendingActions.approve(action, thread: thread)
+            if let hand { RightHands.CardCache.shared.refresh([parent: hand], maxAge: 0) }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                switch result {
+                case .success(let reply):
+                    Permissions.log("right-hands: approval of action \(n) answered: \(reply.prefix(120))")
+                    self.hud.showResult(reply.isEmpty ? "Sent to \(name)." : reply)
+                case .failure(let why):
+                    Permissions.log("right-hands: approval of action \(n) failed: \(why)")
+                    self.hud.showResult("\(name) didn't take the approval just now.")
+                }
+                self.showIdleGrid()
+            }
+        }
+    }
+
+    /// Go to Agent for an action: Ghostty attached to the agent's tmux session.
+    private func goToActionAgent(_ n: Int, of parent: String) {
+        guard let card = RightHands.CardCache.shared.card(for: parent),
+              let agent = card.actions.first(where: { $0.id == n })?.target else { return }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let outcome = GhosttyDoor.open(tmuxSession: agent)
+            await MainActor.run { [weak self] in
+                Permissions.log("right-hands: go to \(agent) for action \(n): \(outcome)")
+                if case .opened = outcome { return }
+                self?.hud.showResult("\(agent) has no screen to open right now.")
+            }
         }
     }
 

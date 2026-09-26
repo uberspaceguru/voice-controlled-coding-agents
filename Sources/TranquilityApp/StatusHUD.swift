@@ -3268,6 +3268,12 @@ final class StatusHUD: NSObject {
                                                target: self, action: #selector(sessionRowTapped(_:)))
                     waitingRows.addArrangedSubview(nested)
                     nested.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+                case .action:
+                    let row = ActionRowView(item: item, target: self, action: #selector(sessionRowTapped(_:)))
+                    waitingRows.addArrangedSubview(row)
+                    row.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+                case .approve, .goTo:
+                    break          // doors inside an action's row, never rows of their own
                 }
                 if isLastOfGroup, index < shown.count - 1 {
                     waitingRows.addArrangedSubview(hairline(StateLegend.Palette.hairline))

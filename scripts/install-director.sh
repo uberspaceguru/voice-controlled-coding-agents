@@ -114,6 +114,7 @@ wanted = {  # (hand, key) -> argv; the card's status (tb-indicators) and the bra
     ("Yobi1", "projects"): status + ["Yobi1"],
     ("Sys-3PO", "projects"): status + ["Sys-3PO", "--health"],
     ("Director", "ready"): ["director", "--json", "ready"],
+    ("Director", "actions"): ["director", "--json", "actions"],
 }
 given = []
 for hand in data.get("hands", []):

@@ -254,3 +254,22 @@ thread, and the second answer cut off the first about 3 s into it.
 While the brain is being asked, the card's placard reads **◌ ASKING
 DIRECTOR…** (or the hand's name) until the answer arrives, so a press never
 looks lost. ⌃⌃ on a TEST SUMMONS card asks nothing.
+
+## Pending actions on the Director card (25 Sep)
+
+Long work lives on the card, never in voice. Director's `pending_actions`
+(`director --json actions`, the hand's `actions` command in the roster) are drawn
+under its lines, most important first (waiting on you, in progress, queued, then
+finished), six at most:
+
+- the action in plain words;
+- a chip with its state: "awaiting your approval", "in progress since 21:04",
+  "queued", "done at 21:30", "failed at 21:30";
+- **Approve ›**, only while it waits on you: one `director --json ask "Yes, I
+  approve action <id>: <what> (<item>)." --named` in Director's thread and
+  nothing else; the reply is shown, not spoken, and the card is read again;
+- **Go to Agent ›**, when it names an agent: Ghostty attached to that agent's
+  tmux session.
+
+The row itself does nothing when tapped. `scripts/install-director.sh` gives
+Director its `actions` command in the Director app's roster.

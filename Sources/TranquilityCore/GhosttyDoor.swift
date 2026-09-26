@@ -57,9 +57,16 @@ public enum GhosttyDoor {
     /// Open a Ghostty window attached to the session's pane. Blocking; call
     /// it off the main thread.
     public static func open(sessionId: String) -> Outcome {
+        guard let name = tmuxSession(forSessionId: sessionId) else {
+            return isInstalled ? .notInTmux : .notInstalled
+        }
+        return open(tmuxSession: name)
+    }
+
+    /// The same, by tmux session name (a pending action names its agent, 25 Sep).
+    public static func open(tmuxSession name: String) -> Outcome {
         guard isInstalled else { return .notInstalled }
-        guard let name = tmuxSession(forSessionId: sessionId),
-              let socket = socket(for: name) else { return .notInTmux }
+        guard let socket = socket(for: name) else { return .notInTmux }
         switch Subprocess.run("/usr/bin/open", openArguments(socket: socket, session: name), timeout: 10) {
         case .success: return .opened(socket: socket, session: name)
         case .failure(let error): return .failed(error.message)
