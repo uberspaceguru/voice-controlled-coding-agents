@@ -444,10 +444,16 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
 
     def test_what_counts_as_a_hearing_check(self):
         for yes in ("Hello?", "Director?", "Hello. Director, you there?", "are you there", "Tranquility, can you hear me?",
-                    "hey, you with me?"):
+                    "hey, you with me?",
+                    # tb-hearing-check-2 (26 Sep 10:49): the name misheard, and the list Director sent
+                    "Directory, still there?", "I direct. Are you still there?", "still there?", "you there?",
+                    "you still there?", "you with me?", "hello?", "hey Director", "Hey, Director.",
+                    "can you hear me?", "you hear me?", "are you there?", "Director?", "Director, you still with me?",
+                    "Can you still hear me?", "Anyone there?", "Director, are you listening?"):
             self.assertTrue(d.hearing_check(yes), yes)
         for no in ("okay", "Director, what needs me?", "can you hear me when I whisper to the build", "hello Wispr team",
-                   "are you there yet with the fix"):
+                   "are you there yet with the fix", "Here.", "There.", "Director.", "Directory, what's still there?",
+                   "is the build still there?", "are the tests still there?", "Director, go there"):
             self.assertFalse(d.hearing_check(no), no)
 
     async def test_a_placeholder_says_so(self):

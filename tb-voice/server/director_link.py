@@ -223,7 +223,7 @@ _NO_FILLER = re.compile(
 # (Ahmed, 26 Sep 09:55: "Hello. Director, you there?" got "Let me check that."
 # then 1.3 s of model). The words left after the greetings and the names must be
 # one of these, or nothing at all when he only said a name or "hello?".
-_CHECK_WORDS = {"hello", "hi", "hey", "yo", "director", "tranquility", "tranquillity"}
+_CHECK_WORDS = {"hello", "hi", "hey", "yo", "director", "directory", "directer", "tranquility", "tranquillity"}
 HEARING_CHECKS = {
     "", "you there", "are you there", "you still there", "are you still there", "still there",
     "can you hear me", "you hear me", "do you hear me", "can you hear me now", "hear me",
@@ -233,16 +233,38 @@ HEARING_CHECKS = {
 HEARING_REPLY = "Yes, I'm here."
 
 
+# A presence question in five words or fewer (tb-hearing-check-2, 26 Sep 10:49:
+# "Directory, still there?" got a filler and a recap): "(are) (you) (still)
+# there / here / with me / listening", "(can / do) (you) (still) hear me (now)",
+# "anyone there". It must name him or say "still" or "anyone", so a bare "Here."
+# answering something is not taken for one.
+_PRESENCE = re.compile(
+    r"^(?:(?:are|r)\s+)?(?:you\s+)?(?:still\s+)?(?:there|here|with\s+me|listening|around|awake|alive)$"
+    r"|^(?:(?:can|do|could)\s+)?(?:you\s+)?(?:still\s+)?hear\s+me(?:\s+(?:now|okay|ok|alright|all\s+right))?$"
+    r"|^(?:is\s+)?any(?:one|body)\s+(?:there|here|home)$")
+_GREETINGS = {"hello", "hi", "hey", "yo"}
+
+
 def hearing_check(text: str) -> bool:
-    words = re.findall(r"[a-z']+", (text or "").lower())
+    """A short presence question ("still there?", "Director, you with me?",
+    "hey Director", "hello?"), however the name was heard: answered by code."""
+    t = text or ""
+    rest_of = _director_vocative(t)       # "Directory, …", "I direct. …": the name as the router hears it
+    if rest_of is not None and rest_of.strip():
+        t = rest_of
+    words = re.findall(r"[a-z']+", t.lower())
     if not words:
         return False
-    rest = " ".join(w for w in words if w not in _CHECK_WORDS)
+    rest = [w for w in words if w not in _CHECK_WORDS]
     if rest:
-        return rest in HEARING_CHECKS
-    # Only greetings and names: "Director?" and "Hello?" are checks; "Director." and "Hey, Director." stay calls
-    # (the next words go to Director), as before.
-    return "?" in text or set(words) <= {"hello", "hi"}
+        line = " ".join(rest)
+        if line in HEARING_CHECKS:
+            return True
+        return (len(rest) <= 5 and bool(_PRESENCE.match(line))
+                and bool({"you", "still", "anyone", "anybody"} & set(rest)))
+    # Only greetings and names: "Director?", "Hello?" and "Hey, Director" are checks (a summons is answered);
+    # a bare "Director." stays a call (the next words go to Director), as before.
+    return "?" in text or set(words) <= {"hello", "hi"} or bool(_GREETINGS & set(words))
 
 
 def wants_filler(words: str) -> bool:
