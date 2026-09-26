@@ -1,7 +1,8 @@
 """tb-voice: the hands-free manager for Tranquility Base.
 
-Cascade: Gradium STT -> Smart Turn v3 -> AddressedGate (Jev) -> MiniMax M2.7 on General
-Compute (tools via tbase) -> Gradium TTS. Design: ../docs/design.md.
+Cascade: Gradium STT (its end-of-turn forecast ends turns, turn_end.py) -> AddressedGate
+(Jev) -> MiniMax M2.7 on General Compute (tools via tbase) -> Gradium TTS.
+Design: ../docs/design.md.
 
 Run with keys injected from the Keychain: ./run.sh
 """
@@ -15,8 +16,6 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from loguru import logger
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer, VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -27,18 +26,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
-)
-from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
-    SpeechTimeoutUserTurnStopStrategy,
-)
-from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
-    TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
@@ -51,12 +43,13 @@ from prompt import SYSTEM
 from speech_delivery import OutputDeliveryObserver
 from tools import SCHEMAS
 from tts import SpokenGradiumTTSService
+from turn_end import ForecastGradiumSTTService, ForecastTurnStopStrategy
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     logger.info("Starting tb-voice")
 
-    stt = GradiumSTTService(api_key=os.environ["GRADIUM_API_KEY"])
+    stt = ForecastGradiumSTTService(api_key=os.environ["GRADIUM_API_KEY"])
     tts = SpokenGradiumTTSService(
         api_key=os.environ["GRADIUM_API_KEY"],
         settings=GradiumTTSService.Settings(voice=os.getenv("GRADIUM_VOICE_ID") or None),
@@ -86,20 +79,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
                         min_words=int(os.getenv("TB_MIN_WORDS", "2"))
                     )
                 ],
-                stop=[
-                    TurnAnalyzerUserTurnStopStrategy(
-                        turn_analyzer=LocalSmartTurnAnalyzerV3(
-                            params=SmartTurnParams(
-                                stop_secs=float(os.getenv("TB_STOP_SECS", "1.0"))
-                            )
-                        )
-                    ),
-                    # A pause ends the turn even when the model is unsure: the
-                    # default outcome of a turn is silence, so ending early is cheap.
-                    SpeechTimeoutUserTurnStopStrategy(
-                        user_speech_timeout=float(os.getenv("TB_SPEECH_TIMEOUT", "1.2"))
-                    ),
-                ]
+                # The transcriber's end-of-turn forecast ends a turn; words that
+                # hold the floor ("and", "to", "um") wait 2.5 s of silence; silence
+                # alone ends it after 2.5 s (turn_end.py). A 1.0-1.2 s silence rule
+                # split 24 of Ahmed's turns mid-sentence on 25 Sep.
+                stop=[ForecastTurnStopStrategy(stt.forecast)]
             ),
         ),
     )
