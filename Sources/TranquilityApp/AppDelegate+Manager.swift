@@ -128,7 +128,7 @@ extension AppDelegate {
             heardFinals = []; heardInterim = ""; heardFresh = false
             // Drawn as he speaks only inside a conversation with nothing else playing;
             // otherwise not until the voice takes the turn as his.
-            heardShown = hud.conversationCard && !otherAudioOn
+            heardShown = hud.conversationCard && !nameOnly
         }
         if final { heardFinals.append(words); heardInterim = "" } else { heardInterim = words }
         hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: "hearing")
@@ -139,10 +139,20 @@ extension AppDelegate {
     func orbLine(_ fallback: String) -> String {
         let said = (heardFinals + (heardInterim.isEmpty ? [] : [heardInterim])).joined(separator: " ")
         if heardShown && !said.isEmpty { return Self.heardStrip(said) }
-        return otherAudioOn ? Self.otherAudioLine : fallback
+        return nameOnly ? Self.otherAudioLine : fallback
     }
 
-    static let otherAudioLine = "hearing other audio \u{00B7} say Director to talk"
+    /// Plainly, on the card (tb-media-aware-2): the mode, why, and what to say.
+    static let otherAudioLine = "Name only: other audio is playing. Say \u{201C}Director\u{201D} to talk."
+    static let activeConversationSecs: TimeInterval = 120
+
+    /// The voice's rule, mirrored: other audio playing and no Director voice for
+    /// 120 s. An active conversation is never demoted.
+    var nameOnly: Bool {
+        guard otherAudioOn else { return false }
+        guard let spoke = directorSpokeAt else { return true }
+        return Date().timeIntervalSince(spoke) >= Self.activeConversationSecs
+    }
 
     /// Once a second while hands-free runs: is another app playing sound?
     func watchOtherAudio() {
@@ -159,6 +169,8 @@ extension AppDelegate {
         otherAudioTimer?.invalidate()
         otherAudioTimer = nil
         if otherAudioOn { otherAudioOn = false; writeOtherAudio([]) }
+        directorSpokeAt = nil                // a new voice starts idle, as the voice itself does
+        nameOnlyShown = false
     }
 
     private func sampleOtherAudio() {
@@ -167,12 +179,16 @@ extension AppDelegate {
         let who = Array(Set(players.map { $0.bundle.isEmpty ? "pid \($0.pid)" : $0.bundle })).sorted()
         if otherAudioDebounce.update(!players.isEmpty) {
             otherAudioOn = otherAudioDebounce.on
-            Permissions.log("hands-free: other audio \(otherAudioOn ? "playing (\(who.joined(separator: ", ")))" : "stopped"); "
-                            + (otherAudioOn ? "name only" : "the conversation window is back"))
+            Permissions.log("hands-free: other audio \(otherAudioOn ? "playing (\(who.joined(separator: ", ")))" : "stopped")")
             writeOtherAudio(who)
-            hud.setManagerState(StatusHUD.orbState, line: orbLine(otherAudioOn ? Self.otherAudioLine : "listening"))
         } else if otherAudioOn && Date().timeIntervalSince(otherAudioWritten) > 5 {
             writeOtherAudio(who)            // the voice reads a file older than 15 s as nothing playing
+        }
+        // The mode also turns on by time alone: two quiet minutes with other audio playing.
+        if nameOnly != nameOnlyShown {
+            nameOnlyShown = nameOnly
+            Permissions.log("hands-free: \(nameOnly ? "name only (other audio, the conversation idle)" : "the conversation is open to him")")
+            hud.setManagerState(StatusHUD.orbState, line: orbLine(nameOnly ? Self.otherAudioLine : "listening"))
         }
     }
 
@@ -943,7 +959,7 @@ extension AppDelegate {
             // his words. A dismissal or a held stop keeps what he said.
             if e.text != nil && e.reason == nil {
                 heardFinals = []; heardInterim = ""; heardFresh = true; heardShown = false
-                hud.setManagerState(StatusHUD.orbState, line: otherAudioOn ? Self.otherAudioLine : "heard, not for me")
+                hud.setManagerState(StatusHUD.orbState, line: nameOnly ? Self.otherAudioLine : "heard, not for me")
             }
         case .addressed:
             if heardFinals.isEmpty && heardInterim.isEmpty, let text = e.text { noteHeard(text, final: true) }
@@ -959,6 +975,7 @@ extension AppDelegate {
                 // strip under the orb keeps what he said (tb-card-text, 26 Sep).
                 managerLastLine = "speaking"
                 heardFresh = true
+                directorSpokeAt = Date()        // the conversation is active: never name-only
                 hud.setManagerState(StatusHUD.orbState, line: orbLine("speaking"), mood: "speaking")
                 noteConversation(e.text)
             }
@@ -993,6 +1010,7 @@ extension AppDelegate {
             // Played here even with hands-free on: the bot handed the line over
             // and synthesizes nothing (the silent-answers bug, 25 Sep 17:01).
             Permissions.log("manager: answer from \(name) for \(session.prefix(8)); playing it on the card")
+            if name == "Director" { directorSpokeAt = Date() }
             speakOnCard(text, as: session, name: name, force: true)
         case .card:
             // M26: what Director's card shows with the sentence that follows.

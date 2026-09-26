@@ -205,6 +205,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var otherAudioDebounce = OtherAudio.Debounce()
     var otherAudioTimer: Timer?
     var otherAudioWritten = Date.distantPast
+    /// When Director's voice last spoke: a conversation within 120 s of it is
+    /// active and never name-only (tb-media-aware-2, the voice's own rule).
+    var directorSpokeAt: Date?
+    /// What the strip last said about the mode, so a change is drawn once.
+    var nameOnlyShown = false
     /// A right-hand whose card was opened before the manager was ready to take
     /// it on stage (23 Sep): handed over on the child's `ready` line.
     var pendingStage: (session: String, name: String)?
