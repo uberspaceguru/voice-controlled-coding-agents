@@ -139,6 +139,19 @@ extension StatusHUD {
         // The right-hands panel with Director open (25 Sep): four hands, and
         // the accordion drawn by the same Core builder the app uses, so this
         // picture is the rendering Ahmed gets, with Director's words in it.
+        case "handsfree-conversation":
+            // tb-handsfree-transition (26 Sep): in a conversation the panel is
+            // Director's card, the orb and STOP HANDS-FREE under the sentence.
+            setManager(on: true)
+            setManagerState(Self.orbState, line: "speaking", mood: "speaking")
+            conversationCard = true
+            let line = "Ten things need you; first, the Jev pilot worker needs approval to send private repo metadata."
+            let spoken = SpokenTextSanitizer().sanitize(line, allowing: ["Director", "Jev"])
+            _ = showAnnouncement(spoken: spoken, sessionId: "ac03daf5-bd0a-42a7-91b2-fe789e3f8a1a", pid: nil,
+                                 project: "Director", cwd: nil, eventId: "ac03daf5-bd0a-42a7-91b2-fe789e3f8a1a",
+                                 placard: "\(StateLegend.Glyph.speaking) DIRECTOR")
+            highlight(upTo: spoken.text.count)
+
         case "right-hands-handsfree":
             // tb-handsfree-ui (25 Sep): hands-free on, the four rows kept with
             // their dots, upstream's orb and its line above STOP HANDS-FREE.

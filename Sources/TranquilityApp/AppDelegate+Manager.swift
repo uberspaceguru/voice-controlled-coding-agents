@@ -86,6 +86,47 @@ extension AppDelegate {
     }
 }
 
+// MARK: - Hands-free's conversation card (26 Sep)
+
+extension AppDelegate {
+    /// A turn aimed at Director, or Director speaking, puts Director's card up
+    /// and keeps it there; the list is the idle view, back after 60 s with no
+    /// turn and no voice (Ahmed, 26 Sep: the list during a conversation is
+    /// useless). Room sound alone never flips the panel. Only with right-hands.
+    func noteConversation(_ sentence: String?) {
+        guard managerIsOn, let hands = RightHands.current(),
+              let director = hands.order.first(where: { hands.names[$0] == "Director" }) else { return }
+        conversationIdle?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.endConversationCard() }
+        conversationIdle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.conversationIdleSecs, execute: work)
+        if sentence == nil && hud.conversationCard { return }        // already up: keep its last sentence
+        let line = sentence ?? "Listening."
+        hud.conversationCard = true
+        returnToGridWork?.cancel()
+        announceTask?.cancel()
+        let spoken = SpokenTextSanitizer().sanitize(
+            String(line.prefix(1200)), allowing: SpokenTextSanitizer.speakableTerms(in: line).union(["Director"]))
+        let session = hands.hands[director]?.session ?? director
+        // Shown, not spoken: the voice speaks it; the card is its words.
+        if hud.showAnnouncement(spoken: spoken, sessionId: session, pid: nil, project: "Director", cwd: nil,
+                                eventId: session, placard: "\(StateLegend.Glyph.speaking) DIRECTOR") {
+            hud.highlight(upTo: spoken.text.count)
+        }
+    }
+
+    static let conversationIdleSecs: TimeInterval = 60
+
+    func endConversationCard() {
+        conversationIdle?.cancel()
+        conversationIdle = nil
+        guard hud.conversationCard else { return }
+        hud.conversationCard = false
+        Permissions.log("hands-free: a minute without a turn; the list again")
+        showIdleGrid()
+    }
+}
+
 // MARK: - Manager mode: the child, its events, and the orb
 
 extension AppDelegate {
@@ -245,6 +286,7 @@ extension AppDelegate {
 
     @MainActor
     func stopManager() {
+        endConversationCard()
         managerTask?.cancel()
         managerTask = nil
         if let transport = managerTransport { Task { await transport.close() } }
@@ -766,12 +808,15 @@ extension AppDelegate {
             break  // silent on a turn: whatever was last said stays on the panel
         case .addressed:
             hud.setManagerState(StatusHUD.orbState, line: Self.intentLine(e.intent))
+            noteConversation(nil)
         case .speaking:
             managerLastLine = e.text ?? (e.voice == "agent" ? "the agent is speaking" : "speaking")
             hud.setManagerState(StatusHUD.orbState, line: managerLastLine, mood: "speaking")
+            if e.voice != "agent" { noteConversation(e.text) }
         case .reloading:
             hud.setManagerState(StatusHUD.orbState, line: "reloading")
         case .quiet:
+            noteConversation(nil)            // the conversation is still going: keep the card up
             // Voice over: colour back to rest, the last words stay readable.
             hud.setManagerState(StatusHUD.orbState, line: managerLastLine == "speaking" ? "listening" : managerLastLine)
         case .stage:

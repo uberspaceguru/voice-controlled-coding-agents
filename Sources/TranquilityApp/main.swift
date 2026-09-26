@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var pastAgentPreparation: Task<Void, Never>?
     var coordinator: Coordinator?
     var managedCredits: ManagedCreditSession?
+    /// Hands-free's conversation card: when it goes back to the list.
+    var conversationIdle: DispatchWorkItem?
     /// The voice and the transcript, bought on the account. Held so the
     /// transcription session can be ended when the microphone closes.
     var managedAudio: ManagedAudio?

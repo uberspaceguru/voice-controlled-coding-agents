@@ -2558,7 +2558,13 @@ final class StatusHUD: NSObject {
             // Only when nothing has been spoken yet. Re-arming the wash over
             // text that is already half-inked is the other half of the "it
             // reset" symptom — the words go grey AND start loading again.
-            if inkCursor == 0 { armBodyShimmer() }
+            if inkCursor == 0 && !conversationCard { armBodyShimmer() }
+            // Hands-free's conversation card (26 Sep): Director's card with the
+            // orb and STOP HANDS-FREE under the sentence; the list is the idle view.
+            if conversationCard && managerOn {
+                rebuildConversationRows()
+                waitingRows.isHidden = false
+            }
 
         case .idle where face.grid:
             // The grid: the idle face IS one row per live session (WS-B, ruled).
@@ -3400,6 +3406,29 @@ final class StatusHUD: NSObject {
     /// While the child connects: the ring, breathing.
     static let orbConnecting = "breathing"
     lazy var managerOrb = ManagerOrbView(frame: .zero)
+    /// Hands-free is in a conversation with Director: the panel is Director's
+    /// card, not the list (26 Sep, Ahmed: the list during a conversation is
+    /// useless). Set by the app; the list comes back after 60 s of silence.
+    var conversationCard = false
+
+    /// On the conversation card: the orb, above the sentence.
+    private func rebuildConversationRows() {
+        waitingRows.removeAllArrangedSubviews()
+        func rule(_ color: NSColor) {
+            let line = NSView()
+            line.wantsLayer = true
+            line.layer?.backgroundColor = color.cgColor
+            line.translatesAutoresizingMaskIntoConstraints = false
+            line.heightAnchor.constraint(equalToConstant: 1).isActive = true
+            line.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+            waitingRows.addArrangedSubview(line)
+        }
+        // The orb is Director's face above its words. STOP HANDS-FREE stays on
+        // the list and in the menu: on the card it sat between face and words.
+        waitingRows.addArrangedSubview(managerOrb)
+        managerOrb.widthAnchor.constraint(equalToConstant: Self.gridWidth).isActive = true
+        rule(StateLegend.Palette.hairlineSoft)
+    }
     var onManagerToggle: (() -> Void)?
 
     func setManager(on: Bool) {
