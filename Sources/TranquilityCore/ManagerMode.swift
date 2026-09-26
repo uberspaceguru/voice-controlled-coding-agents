@@ -85,6 +85,7 @@ public enum ManagerConfig {
     /// `command()`, which falls back to the default checkout: a hosted
     /// manager is chosen only when nothing local was asked for.
     public static func explicitCommand(config: URL = HubApp.configPath) -> [String]? {
+        if let own = localCommand() { return own }
         if let data = try? Data(contentsOf: config),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let manager = obj["manager"] as? [String: Any],
@@ -162,6 +163,7 @@ public enum ManagerConfig {
     }
 
     public static func command(config: URL = HubApp.configPath) -> [String] {
+        if let own = localCommand() { return own }
         if let data = try? Data(contentsOf: config),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let manager = obj["manager"] as? [String: Any],
@@ -230,6 +232,18 @@ public enum ManagerConfig {
               let raw = obj["audio"] as? String,
               let audio = LocalAudio(rawValue: raw.lowercased()) else { return .child }
         return audio
+    }
+
+    /// This app's own manager command (`command` in its manager.json, an argv
+    /// array), ahead of hq.json's shared `manager.command`: a Director app can
+    /// run a bot from a different checkout without touching what Prod starts.
+    public static func localCommand(settings: URL = localSettingsPath,
+                                    ownFolder: Bool = AppIdentity.supportFolderName != nil) -> [String]? {
+        guard ownFolder,
+              let data = try? Data(contentsOf: settings),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let argv = obj["command"] as? [String], !argv.isEmpty else { return nil }
+        return argv
     }
 
     /// The child's extra environment when its audio is this app's WebRTC

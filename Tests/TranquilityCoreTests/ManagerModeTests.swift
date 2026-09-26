@@ -129,6 +129,13 @@ final class LocalManagerAudioTests: XCTestCase {
         XCTAssertNil(ManagerConfig.environment(base: [:])["TB_AUDIO"], "the default child keeps its own audio")
     }
 
+    func testItsOwnCommandIsItsOwn() throws {
+        let own = try settings(#"{"audio":"webrtc","command":["/usr/bin/python3","/tmp/run.py"]}"#)
+        XCTAssertEqual(ManagerConfig.localCommand(settings: own, ownFolder: true), ["/usr/bin/python3", "/tmp/run.py"])
+        XCTAssertNil(ManagerConfig.localCommand(settings: own, ownFolder: false))
+        XCTAssertNil(ManagerConfig.localCommand(settings: try settings(#"{"command":[]}"#), ownFolder: true))
+    }
+
     func testAFreeLoopbackPort() throws {
         let port = try XCTUnwrap(ManagerConfig.freeLoopbackPort())
         XCTAssertTrue((1024..<65536).contains(port))
