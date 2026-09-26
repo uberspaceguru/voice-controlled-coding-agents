@@ -197,6 +197,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var heardInterim = ""
     /// Director spoke since he last did: his next words start a new line.
     var heardFresh = true
+    /// This turn's words may be drawn: the conversation is up and nothing else
+    /// is playing, or the voice took the turn as his (tb-media-aware, 26 Sep).
+    var heardShown = false
+    /// Another app is playing sound: hands-free is name-only (tb-media-aware).
+    var otherAudioOn = false
+    var otherAudioDebounce = OtherAudio.Debounce()
+    var otherAudioTimer: Timer?
+    var otherAudioWritten = Date.distantPast
     /// A right-hand whose card was opened before the manager was ready to take
     /// it on stage (23 Sep): handed over on the child's `ready` line.
     var pendingStage: (session: String, name: String)?

@@ -124,7 +124,12 @@ extension AppDelegate {
     func noteHeard(_ text: String, final: Bool) {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty else { return }
-        if heardFresh { heardFinals = []; heardInterim = ""; heardFresh = false }
+        if heardFresh {
+            heardFinals = []; heardInterim = ""; heardFresh = false
+            // Drawn as he speaks only inside a conversation with nothing else playing;
+            // otherwise not until the voice takes the turn as his.
+            heardShown = hud.conversationCard && !otherAudioOn
+        }
         if final { heardFinals.append(words); heardInterim = "" } else { heardInterim = words }
         hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: "hearing")
     }
@@ -133,7 +138,48 @@ extension AppDelegate {
     /// kept when it runs long; else the state word.
     func orbLine(_ fallback: String) -> String {
         let said = (heardFinals + (heardInterim.isEmpty ? [] : [heardInterim])).joined(separator: " ")
-        return said.isEmpty ? fallback : Self.heardStrip(said)
+        if heardShown && !said.isEmpty { return Self.heardStrip(said) }
+        return otherAudioOn ? Self.otherAudioLine : fallback
+    }
+
+    static let otherAudioLine = "hearing other audio \u{00B7} say Director to talk"
+
+    /// Once a second while hands-free runs: is another app playing sound?
+    func watchOtherAudio() {
+        guard otherAudioTimer == nil else { return }
+        otherAudioDebounce = OtherAudio.Debounce()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sampleOtherAudio() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        otherAudioTimer = timer
+    }
+
+    func stopWatchingOtherAudio() {
+        otherAudioTimer?.invalidate()
+        otherAudioTimer = nil
+        if otherAudioOn { otherAudioOn = false; writeOtherAudio([]) }
+    }
+
+    private func sampleOtherAudio() {
+        guard managerIsOn else { return }
+        let players = OtherAudio.players(excluding: OtherAudio.family(of: getpid()))
+        let who = Array(Set(players.map { $0.bundle.isEmpty ? "pid \($0.pid)" : $0.bundle })).sorted()
+        if otherAudioDebounce.update(!players.isEmpty) {
+            otherAudioOn = otherAudioDebounce.on
+            Permissions.log("hands-free: other audio \(otherAudioOn ? "playing (\(who.joined(separator: ", ")))" : "stopped"); "
+                            + (otherAudioOn ? "name only" : "the conversation window is back"))
+            writeOtherAudio(who)
+            hud.setManagerState(StatusHUD.orbState, line: orbLine(otherAudioOn ? Self.otherAudioLine : "listening"))
+        } else if otherAudioOn && Date().timeIntervalSince(otherAudioWritten) > 5 {
+            writeOtherAudio(who)            // the voice reads a file older than 15 s as nothing playing
+        }
+    }
+
+    private func writeOtherAudio(_ who: [String]) {
+        otherAudioWritten = Date()
+        let url = QueueStore.supportDirectory.appendingPathComponent("media.json")
+        try? OtherAudio.stateJSON(playing: otherAudioOn, who: who).write(to: url, options: .atomic)
     }
 
     static let heardStripMost = 150
@@ -220,6 +266,7 @@ extension AppDelegate {
 
     @MainActor
     func startManager() {
+        watchOtherAudio()
         // A hosted manager when configured and no local command is: the same
         // event lines arrive over a socket instead of a pipe, and the bot asks
         // this process for its doors (ManagerSocket.swift).
@@ -370,6 +417,7 @@ extension AppDelegate {
     @MainActor
     func stopManager() {
         endConversationCard()
+        stopWatchingOtherAudio()
         managerTask?.cancel()
         managerTask = nil
         if let transport = managerTransport { Task { await transport.close() } }
@@ -891,9 +939,15 @@ extension AppDelegate {
         case .hearing:
             hud.setManagerState(StatusHUD.orbState, line: orbLine("hearing you"), mood: "hearing")
         case .listening:
-            break  // silent on a turn: whatever was last said stays on the panel
+            // The gate took nothing (tb-media-aware): what it heard is not drawn as
+            // his words. A dismissal or a held stop keeps what he said.
+            if e.text != nil && e.reason == nil {
+                heardFinals = []; heardInterim = ""; heardFresh = true; heardShown = false
+                hud.setManagerState(StatusHUD.orbState, line: otherAudioOn ? Self.otherAudioLine : "heard, not for me")
+            }
         case .addressed:
             if heardFinals.isEmpty && heardInterim.isEmpty, let text = e.text { noteHeard(text, final: true) }
+            heardShown = true                   // the voice took it as his: now it is his words
             hud.setManagerState(StatusHUD.orbState, line: orbLine(Self.intentLine(e.intent)))
             noteConversation(nil, newTurn: true)
         case .speaking:
