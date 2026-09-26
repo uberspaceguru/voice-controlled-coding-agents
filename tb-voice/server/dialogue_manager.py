@@ -172,6 +172,14 @@ class DialogueManagerMixin(MemoryManagerMixin):
         if turn is not None:
             turn.replying = True
 
+    def _name_only(self) -> bool:
+        """Other audio is playing and Director's voice has not spoken for ACTIVE_CONVERSATION_SECS."""
+        import director_link
+        spoke = getattr(self, "_director_spoke_at", None)
+        if spoke is not None and time.monotonic() - spoke < director_link.ACTIVE_CONVERSATION_SECS:
+            return False
+        return director_link.media_playing()
+
     def _merge_late(self, text: str):
         """Speech committed after a turn but before its reply started joins
         that turn: the pending ask is cancelled and re-run with both parts.
@@ -185,8 +193,8 @@ class DialogueManagerMixin(MemoryManagerMixin):
         if (prior is None or prior.route is None or prior.replying or prior.task.done()
                 or not director_link.director_default()):
             return None
-        if director_link.media_playing():
-            return None     # other audio: its words never join his turn
+        if self._name_only():
+            return None     # other audio while idle: its words never join his turn
         own = director_link.route_default(text, follow_up=True)
         if own is None or own[0] in {"mute", "call"}:
             return None     # "stop" is its own turn; a bare call opens a new one
@@ -275,11 +283,10 @@ class DialogueManagerMixin(MemoryManagerMixin):
             if default:
                 # "Stop. Tell me about the first one.": the stop was acted on over the voice; the rest is the turn
                 text = director_link.after_stop(text)
-            # Another app is playing sound (tb-media-aware): only a turn that names someone is his
-            media = default and director_link.media_playing()
+            # Another app is playing sound and the conversation is idle (tb-media-aware): only a turn
+            # that names someone is his. An active one is never demoted (tb-media-aware-2).
+            media = default and self._name_only()
             named = media and director_link.names_someone(text)
-            if media and not named:
-                self._follow_up_until = 0.0
             if default and director_link.hearing_check(text) and (not media or named):
                 # "Hello, Director, you there?": code answers at once; no model, no filler, no lookup
                 settled = True

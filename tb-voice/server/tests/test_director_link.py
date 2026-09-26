@@ -565,6 +565,28 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         asked = [c.args[3] for c in run.await_args_list if "ask" in c.args]
         self.assertEqual(asked, ["what needs me?", "what is ready?"])
 
+    async def test_other_audio_never_demotes_an_active_conversation(self):
+        # tb-media-aware-2 (26 Sep 13:58, talk_log 451-453): mid-conversation, a video and YobiWispr's sound
+        # turned the gate name-only and Director went silent on him
+        import time as _time
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director"}
+        run = AsyncMock(return_value=(0, json.dumps({"reply": "Noted."})))
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", AsyncMock()), \
+                patch("dialogue_manager.emit", AsyncMock()), patch.object(d, "media_playing", lambda *a, **k: True):
+            await self.m._dialogue_turn("Director, what needs me?", None, None)
+            self.m._director_spoke_at = _time.monotonic()          # what the real _say records
+            await self.m._dialogue_turn("tell me more about the first one", None, None)
+            await self.m._dialogue_turn("still there?", None, None)
+            self.m._director_spoke_at = _time.monotonic() - d.ACTIVE_CONVERSATION_SECS - 1
+            self.m._follow_up_until = _time.monotonic() + 30        # even with the window open: idle is idle
+            await self.m._dialogue_turn("the progress of human farming", None, None)
+            await asyncio.sleep(0)
+        asked = [c.args[3] for c in run.await_args_list if "ask" in c.args]
+        self.assertEqual(asked, ["what needs me?", "tell me more about the first one"],
+                         "active: his follow-up is Director's; idle again: the video's words are not")
+        self.assertIn("Yes, I'm here.", [c.args[0] for c in self.m._say.await_args_list], "an active check is answered")
+
     def test_media_state_is_read_fresh_or_not_at_all(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "media.json")

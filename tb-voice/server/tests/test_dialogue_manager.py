@@ -277,6 +277,7 @@ class Integration(unittest.IsolatedAsyncioTestCase):
             await Manager._say(m, sentence, voice="director")
         spoken = [c.kwargs["text"] for c in emit.await_args_list if c.args[1:] == ("speaking",)]
         self.assertEqual(spoken, [sentence])
+        self.assertIsNotNone(getattr(m, "_director_spoke_at", None), "Director's voice marks the conversation active")
 
     async def test_real_say_retries_interrupted_output_at_most_once(self):
         m = manager()

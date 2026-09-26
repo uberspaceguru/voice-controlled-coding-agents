@@ -360,6 +360,10 @@ def after_stop(text: str) -> str:
 # names Director or a right-hand is his. A file older than MEDIA_FRESH_SECS is
 # a dead app's, and means nothing is playing.
 MEDIA_FRESH_SECS = 15.0
+# tb-media-aware-2 (26 Sep 13:58, talk_log 451-453: "Director just died
+# mid-conversation"): other audio never demotes an ACTIVE conversation, one
+# where Director's voice spoke within this many seconds; name-only is for idle.
+ACTIVE_CONVERSATION_SECS = 120.0
 
 
 def media_path() -> str | None:

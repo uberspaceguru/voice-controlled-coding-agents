@@ -642,6 +642,8 @@ class Manager(DialogueManagerMixin, FrameProcessor):
         async with self._voice:
             self._require_current()
             self._reply_starting()
+            if name == "Director":
+                self._director_spoke_at = time.monotonic()         # spoken on the card: still his conversation
             EXTERNAL_UNTIL["t"] = time.monotonic() + secs
             await emit(self, "answer", session=hand["session"], name=name, text=reply)
             await asyncio.sleep(secs)
@@ -978,6 +980,8 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             async with self._voice:
                 self._require_current()
                 self._reply_starting()
+                if voice == "director":
+                    self._director_spoke_at = time.monotonic()     # the conversation is active (media-aware)
                 # The whole sentence: the card shows it once and whole (tb-card-text, 26 Sep; it was cut
                 # at 160 characters, mid-word, "not a rea").
                 await emit(self, "speaking", voice=voice, session=session, text=text[:1200])
