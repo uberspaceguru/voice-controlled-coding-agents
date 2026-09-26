@@ -7,13 +7,14 @@ final class CardPayloadTests: XCTestCase {
 
     func testAListKeepsItsRowsAndDropsRowsWithNoTitle() {
         let json = #"{"kind":"list","title":"What needs you","rows":[{"n":1,"project":"YobiWispr","title":"run this command?","age":"3 h","agent":"w-a20-2"},{"n":2,"project":"x"},{"line":"a bare line"}]}"#
-        guard case .list(let title, let rows)? = CardPayload.parse(json: json) else { return XCTFail("a list") }
+        guard case .list(let title, let rows, _)? = CardPayload.parse(json: json) else { return XCTFail("a list") }
         XCTAssertEqual(title, "What needs you")
         XCTAssertEqual(rows, [.init(n: 1, project: "YobiWispr", title: "run this command?", age: "3 h", agent: "w-a20-2"),
                               .init(title: "a bare line")])
         let many = #"{"kind":"list","rows":["# + (1...9).map { #"{"title":"t\#($0)"}"# }.joined(separator: ",") + "]}"
-        guard case .list(_, let capped)? = CardPayload.parse(json: many) else { return XCTFail("a list") }
+        guard case .list(_, let capped, let more)? = CardPayload.parse(json: many) else { return XCTFail("a list") }
         XCTAssertEqual(capped.count, CardPayload.mostRows)
+        XCTAssertEqual(more, 9 - CardPayload.mostRows)
     }
 
     func testAnItemCarriesTheFullQuestionAndWhoAnswersIt() {
@@ -50,6 +51,25 @@ final class CardPayloadTests: XCTestCase {
             return XCTFail("text is split into lines")
         }
         XCTAssertEqual(fromText, ["a", "b"])
+    }
+
+    /// The shapes Director's brain actually sends (Director voice_card.py, 782a227).
+    func testDirectorsOwnShapes() {
+        let item = #"{"kind":"item","n":2,"project":"TeamChat","title":"desktop refresh fix","question":"Run this command?","agent":"w-a21","since":"3 h","status":"waiting","actions":["open its screen","answer it","tell it something"],"action_id":null}"#
+        guard case .item(let i)? = CardPayload.parse(json: item) else { return XCTFail("an item") }
+        XCTAssertEqual(i.reply, .approve, "answerable: Approve")
+        XCTAssertEqual(i.since, "3 h")
+        XCTAssertEqual(CardPayload.parse(json: item)?.approveText, "Yes, I approve number 2: TeamChat: desktop refresh fix.")
+        let screenOnly = #"{"kind":"item","n":2,"title":"t","actions":["open its screen"]}"#
+        XCTAssertNil(CardPayload.parse(json: screenOnly)?.approveText, "logged out or sending off: no Approve")
+        let opened = #"{"kind":"action","what":"Opened w-a21","state":"done","target":"w-a21","started_at":1790440000000}"#
+        guard case .action(let a)? = CardPayload.parse(json: opened) else { return XCTFail("an id-less action still draws") }
+        XCTAssertEqual(a.what, "Opened w-a21")
+        XCTAssertNil(CardPayload.parse(json: #"{"kind":"action","what":"x","state":"awaiting_ahmed"}"#)?.approveText,
+                     "no row to approve")
+        let fleet = #"{"kind":"list","title":"3 agents","rows":[{"n":1,"agent":"w-a21","project":"TeamChat","title":"needs you","state":"needs_you","age":"now"}]}"#
+        guard case .list(_, let rows, _)? = CardPayload.parse(json: fleet) else { return XCTFail("a list") }
+        XCTAssertEqual(rows.first?.agent, "w-a21")
     }
 
     func testNoneAndNonsenseClearTheCard() {

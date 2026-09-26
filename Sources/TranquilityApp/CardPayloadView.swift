@@ -13,9 +13,10 @@ enum CardPayloadRows {
     static func build(_ payload: CardPayload, target: AnyObject, action: Selector) -> [NSView] {
         var out: [NSView] = [rule()]
         switch payload {
-        case .list(let title, let rows):
+        case .list(let title, let rows, let more):
             if let title { out.append(placard(title)) }
             out += rows.map { listRow($0, target: target, action: action) }
+            if more > 0 { out.append(chip("and \(more) more", StateLegend.Palette.hint)) }
         case .item(let item):
             out.append(itemView(item, target: target, action: action))
         case .action(let a):
@@ -58,6 +59,7 @@ enum CardPayloadRows {
             views.append(q)
         }
         var under: [NSView] = []
+        if let since = item.since { under.append(chip(since, StateLegend.Palette.hint)) }
         switch item.reply {
         case .approve?:
             under.append(ActionRowView.door("Approve", id: CardPayload.Door.approve.id,
@@ -86,7 +88,7 @@ enum CardPayloadRows {
         hang.headIndent = text("\(StateLegend.Glyph.dot)  ", .clear).size().width
         line.addAttribute(.paragraphStyle, value: hang, range: NSRange(location: 0, length: line.length))
         var under: [NSView] = [chip(PendingActions.chip(a), ActionRowView.ink(lamp))]
-        if a.state == .awaitingAhmed {
+        if a.state == .awaitingAhmed && a.id > 0 {
             under.append(ActionRowView.door("Approve", id: CardPayload.Door.approve.id,
                                             ink: StateLegend.Palette.fault, target: target, action: action))
         }

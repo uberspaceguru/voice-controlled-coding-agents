@@ -34,14 +34,17 @@ public enum CardPayload: Equatable, Sendable {
         public var agent: String?
         public var reply: Reply?
         public var actionId: Int?
+        /// How long it has waited ("3 h").
+        public var since: String?
         public init(n: Int? = nil, project: String? = nil, title: String, question: String? = nil,
-                    agent: String? = nil, reply: Reply? = nil, actionId: Int? = nil) {
+                    agent: String? = nil, reply: Reply? = nil, actionId: Int? = nil, since: String? = nil) {
             self.n = n; self.project = project; self.title = title; self.question = question
-            self.agent = agent; self.reply = reply; self.actionId = actionId
+            self.agent = agent; self.reply = reply; self.actionId = actionId; self.since = since
         }
     }
 
-    case list(title: String?, rows: [Row])
+    /// `more`: rows past the ones drawn ("and 4 more").
+    case list(title: String?, rows: [Row], more: Int = 0)
     case item(Item)
     case action(PendingActions.Action)
     case screen(agent: String?, lines: [String])
@@ -70,15 +73,21 @@ public enum CardPayload: Equatable, Sendable {
                 return Row(n: int(r["n"]), project: text(r["project"]), title: title, age: text(r["age"]),
                            agent: text(r["agent"]))
             }
-            return rows.isEmpty ? nil : .list(title: text(o["title"]), rows: Array(rows.prefix(mostRows)))
+            return rows.isEmpty ? nil : .list(title: text(o["title"]), rows: Array(rows.prefix(mostRows)),
+                                              more: max(0, rows.count - mostRows))
         case "item":
             guard let title = text(o["title"]) ?? text(o["question"]) else { return nil }
+            // Director's items (voice_card.item_card) say what he can do in `actions`; "answer it" means
+            // the question is his to answer and sending is on, which is what Approve needs.
+            let can = (o["actions"] as? [String] ?? []).map { $0.lowercased() }
+            let reply = text(o["reply"]).flatMap(Item.Reply.init(rawValue:)) ?? (can.contains("answer it") ? .approve : nil)
             return .item(Item(n: int(o["n"]), project: text(o["project"]), title: title, question: text(o["question"]),
-                              agent: text(o["agent"]), reply: text(o["reply"]).flatMap(Item.Reply.init(rawValue:)),
-                              actionId: int(o["action_id"])))
+                              agent: text(o["agent"]), reply: reply, actionId: int(o["action_id"]),
+                              since: text(o["since"]) ?? text(o["age"])))
         case "action":
             var row = o
             if row["what"] == nil { row["what"] = o["title"] }
+            if row["id"] == nil { row["id"] = 0 }           // "Opened w-a21": an action with no row of its own
             guard let data = try? JSONSerialization.data(withJSONObject: [row]),
                   let action = PendingActions.parse(data)?.first else { return nil }
             return .action(action)
@@ -137,7 +146,7 @@ public enum CardPayload: Equatable, Sendable {
     public var approveText: String? {
         switch self {
         case .item(let item) where item.reply == .approve: return Self.approveText(item)
-        case .action(let a) where a.state == .awaitingAhmed: return PendingActions.approveText(a)
+        case .action(let a) where a.state == .awaitingAhmed && a.id > 0: return PendingActions.approveText(a)
         default: return nil
         }
     }
