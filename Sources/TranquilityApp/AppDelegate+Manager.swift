@@ -127,8 +127,22 @@ extension AppDelegate {
         }
         let argv = ManagerConfig.command()
         let cwd = (argv[0] as NSString).deletingLastPathComponent
-        let transport = ACPProcessTransport(command: argv, cwd: cwd,
-                                            environment: ManagerConfig.environment())
+        var environment = ManagerConfig.environment()
+        // This app's own setting (manager.json in its own folder, never
+        // hq.json): the child's audio through this app's WebRTC engine, so
+        // its voice is cancelled out of the microphone and it can be talked
+        // over. The child is otherwise the same child.
+        var localRTC: (port: Int, token: String)?
+        if ManagerConfig.localAudio() == .webrtc {
+            if let port = ManagerConfig.freeLoopbackPort() {
+                let token = UUID().uuidString
+                localRTC = (port, token)
+                environment.merge(ManagerConfig.localWebRTCEnvironment(port: port, token: token)) { $1 }
+            } else {
+                Permissions.log("manager: local webrtc asked for, but no free port; the child keeps its own audio")
+            }
+        }
+        let transport = ACPProcessTransport(command: argv, cwd: cwd, environment: environment)
         do { try transport.start() } catch {
             hud.showResult("Manager could not start: \(error.localizedDescription)")
             Permissions.log("manager: start failed \(error)")
@@ -136,7 +150,9 @@ extension AppDelegate {
         }
         managerTransport = transport
         hud.setManager(on: true)  // breathing, "connecting", until the child says ready
-        Permissions.log("manager: started \(argv.joined(separator: " "))")
+        Permissions.log("manager: started \(argv.joined(separator: " "))"
+                        + (localRTC.map { " (audio: this app's WebRTC engine, 127.0.0.1:\($0.port))" } ?? ""))
+        if let localRTC { connectLocalAudio(port: localRTC.port, token: localRTC.token, child: transport) }
         managerTask = Task { @MainActor [weak self] in
             for await line in transport.lines() {
                 guard let self, let event = ManagerEvent.parse(line) else { continue }
@@ -145,6 +161,11 @@ extension AppDelegate {
             guard let self else { return }
             let status = transport.exitStatus
             Permissions.log("manager: child ended (exit \(status.map(String.init) ?? "?"))")
+            // The child's audio goes with the child; a reload brings a new pair.
+            if localRTC != nil, self.managerTransport === transport, let peer = self.managerPeer {
+                self.managerPeer = nil
+                await peer.close()
+            }
             // 75 is the child's own "reload me": its source changed under it.
             // Restart in place; the orb never drops. Anything else is the end.
             if status == 75, self.managerTransport === transport {
@@ -157,6 +178,68 @@ extension AppDelegate {
             self.hud.setManager(on: false)
             self.managerTransport = nil
             self.rebuildMenu()
+        }
+    }
+
+    /// The local child's audio: this app's peer connection to the child's
+    /// signalling server on 127.0.0.1, the same `ManagerPeer` a hosted
+    /// manager uses. Its WebRTC engine plays the child's voice and captures
+    /// the microphone, and cancels the one out of the other. The event lines
+    /// still come on the child's stdout, so nothing is read from the peer.
+    /// If the peer cannot connect or drops, the child is ended, and the
+    /// child's watcher turns hands-free off as it always has: better no
+    /// hands-free than one that cannot hear.
+    @MainActor
+    func connectLocalAudio(port: Int, token: String, child: ACPProcessTransport) {
+        let offer = URL(string: "http://127.0.0.1:\(port)/api/offer")!
+        Task { @MainActor [weak self] in
+            // The child imports its models before it listens: a few seconds.
+            var up = false
+            for _ in 0..<150 where !up {
+                guard let self, self.managerTransport === child else { return }
+                var probe = URLRequest(url: offer)
+                probe.httpMethod = "GET"
+                probe.timeoutInterval = 1
+                if let (_, response) = try? await URLSession.shared.data(for: probe),
+                   response is HTTPURLResponse { up = true; break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            guard let self, self.managerTransport === child else { return }
+            guard up else {
+                Permissions.log("manager: local audio never came up on 127.0.0.1:\(port); ending the child")
+                self.hud.showResult("Hands-free could not connect its audio.")
+                await child.close()
+                return
+            }
+            let peer = ManagerPeer(signal: Self.directSignaller(offer: offer, bearer: token),
+                                   iceServers: []) { argv in
+                await AppDelegate.answerManagerRequest(argv)
+            }
+            peer.onTrace = { line in Permissions.log("manager audio wire: \(line)") }
+            let lines = peer.lines()
+            do { try peer.start() } catch {
+                Permissions.log("manager: local audio peer failed \(error); ending the child")
+                self.hud.showResult("Hands-free could not open the microphone: \(error.localizedDescription)")
+                await child.close()
+                return
+            }
+            self.managerPeer = peer
+            let wanted = AudioInputDevice.resolve()?.name
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard self.managerPeer === peer else { return }
+                if let wanted {
+                    let landed = peer.pinMicrophone(named: wanted)
+                    Permissions.log("manager: local audio microphone \(landed)\(landed == wanted ? "" : " (wanted \(wanted))")")
+                }
+                Permissions.log("manager: local audio echo cancellation \(peer.echoCancellationIsActive ? "on" : "OFF"); "
+                                + peer.audioPathDescription)
+            }
+            for await _ in lines {}  // ends when the connection fails or closes
+            guard self.managerPeer === peer else { return }
+            Permissions.log("manager: local audio peer ended; ending the child")
+            self.managerPeer = nil
+            await child.close()
         }
     }
 
