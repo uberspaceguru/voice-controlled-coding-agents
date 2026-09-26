@@ -163,10 +163,14 @@ public enum DeepLink {
         public var title: String?
         public var selection: String?
         public var pane: String?
+        /// `test=1` (26 Sep): a test of the summons path, from a tool or an
+        /// agent, not from Ahmed. Never spoken; logged and shown on the card
+        /// under `RightHands.testSummonsPlacard`.
+        public var test: Bool
         public init(to: String, text: String, app: String? = nil, title: String? = nil,
-                    selection: String? = nil, pane: String? = nil) {
+                    selection: String? = nil, pane: String? = nil, test: Bool = false) {
             self.to = to; self.text = text; self.app = app; self.title = title
-            self.selection = selection; self.pane = pane
+            self.selection = selection; self.pane = pane; self.test = test
         }
     }
 
@@ -198,7 +202,8 @@ public enum DeepLink {
                                    app: value("app").map { String($0.prefix(200)) },
                                    title: value("title").map { String($0.prefix(300)) },
                                    selection: value("selection").map { String($0.prefix(2000)) },
-                                   pane: value("pane").map { String($0.prefix(80)) }))
+                                   pane: value("pane").map { String($0.prefix(80)) },
+                                   test: ["1", "true", "yes"].contains(value("test")?.lowercased() ?? "")))
         case let other: return .unknown(other)
         }
     }

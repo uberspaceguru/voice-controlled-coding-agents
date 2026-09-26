@@ -54,6 +54,59 @@ final class DirectorAppTests: XCTestCase {
         XCTAssertEqual(y.to, "yobi1")
     }
 
+    /// A test summons (26 Sep): `test=1` marks it, nothing else does, and it
+    /// is asked in a thread beside the card's, never in it.
+    func testATestSummonsIsMarkedAndKeptOutOfTheCardsThread() throws {
+        guard case let .summon(t) = DeepLink.parse(URL(string:
+            "tbdirector://summon?to=director&text=what%20is%20ready&app=com.apple.systempreferences&test=1")!) else {
+            return XCTFail("not a summons")
+        }
+        XCTAssertTrue(t.test)
+        XCTAssertEqual(t.text, "what is ready")
+        for flag in ["true", "YES"] {
+            guard case let .summon(s) = DeepLink.parse(URL(string: "tbdirector://summon?text=hi&test=\(flag)")!) else {
+                return XCTFail(flag)
+            }
+            XCTAssertTrue(s.test, flag)
+        }
+        for url in ["tbdirector://summon?text=hi", "tbdirector://summon?text=hi&test=0", "tbdirector://summon?text=hi&test="] {
+            guard case let .summon(s) = DeepLink.parse(URL(string: url)!) else { return XCTFail(url) }
+            XCTAssertFalse(s.test, url)
+        }
+        XCTAssertNotEqual(RightHands.testThread("ac03daf5"), "ac03daf5")
+        XCTAssertEqual(RightHands.summonsArgv(t, thread: RightHands.testThread("ac03daf5"))[6], "ac03daf5:test")
+        XCTAssertEqual(RightHands.testSummonsPlacard, "TEST SUMMONS")
+    }
+
+    /// The duplicate turn (26 Sep): two ⌃⌃ presses 1.9 s apart asked Director
+    /// twice on one thread. One ask at a time per hand; a press meanwhile is
+    /// refused, words meanwhile wait their turn, and another hand is free.
+    func testOneBrainAskAtATimePerHand() {
+        let asks = RightHands.BrainAsks()
+        XCTAssertFalse(asks.isAsking(director))
+        XCTAssertEqual(asks.begin(director), .go)
+        XCTAssertTrue(asks.isAsking(director))
+        XCTAssertEqual(asks.begin(director), .busy, "the second press asks nothing")
+        XCTAssertEqual(asks.begin(yobi), .go, "another hand is its own")
+        XCTAssertEqual(asks.begin(director, queueing: "is the GPU one done?"), .queued)
+        XCTAssertEqual(asks.begin(director, queueing: "and the pilot?"), .queued)
+        XCTAssertEqual(asks.finish(director), "is the GPU one done?", "words wait, in order")
+        XCTAssertTrue(asks.isAsking(director), "still claimed for the words it handed back")
+        XCTAssertEqual(asks.begin(director), .busy)
+        XCTAssertEqual(asks.finish(director), "and the pilot?")
+        XCTAssertNil(asks.finish(director))
+        XCTAssertFalse(asks.isAsking(director))
+        XCTAssertEqual(asks.begin(director), .go, "free again once answered")
+        XCTAssertNil(asks.finish(yobi))
+    }
+
+    /// More continues the card's conversation instead of asking a fixed
+    /// question, and is not the ask that renumbers the list.
+    func testMoreGoesOn() {
+        XCTAssertEqual(RightHands.moreRequest, "go on")
+        XCTAssertNotEqual(RightHands.moreRequest, "what needs me?")
+    }
+
     func testItsOwnSchemeWins() {
         XCTAssertEqual(AppIdentity.preferredScheme(among: ["tbdirector"], channel: .director, own: "tbdirector"),
                        "tbdirector")
