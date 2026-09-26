@@ -396,6 +396,30 @@ public enum RightHands {
         }
     }
 
+    /// A summons asked of Director (25 Sep, SPEC-summons-20260925): `director ask`
+    /// on channel summons, the context as JSON, in `thread`. Pure, for tests.
+    public static func summonsArgv(_ s: DeepLink.Summons, thread: String) -> [String] {
+        let context = ["app": s.app, "title": s.title, "selection": s.selection, "pane": s.pane]
+            .compactMapValues { $0 }
+        let json = (try? JSONSerialization.data(withJSONObject: context, options: [.sortedKeys]))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return ["director", "ask", s.text, "--channel", "summons", "--external-id", thread, "--context", json]
+    }
+
+    /// Run a summons; the line Director answers with (empty when it chose
+    /// silence), or why it failed. Blocking: call it detached.
+    public static func summon(_ s: DeepLink.Summons, thread: String, timeout: TimeInterval = 60,
+                              run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
+                                  Subprocess.run($0, $1, timeout: $2)
+                              }) -> Result<String, AskFailure> {
+        let argv = summonsArgv(s, thread: thread)
+        guard let program = executable(argv[0]) else { return .failure(.failed("director is not on this Mac")) }
+        switch run(program, Array(argv.dropFirst()), timeout) {
+        case .success(let out): return .success(out.trimmingCharacters(in: .whitespacesAndNewlines))
+        case .failure(let error): return .failure(.failed(error.message.isEmpty ? "director failed" : error.message))
+        }
+    }
+
     /// Run a hand's `projects` command and read the card from what it prints.
     public static func projects(_ hand: Hand, timeout: TimeInterval = 20,
                                 run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {

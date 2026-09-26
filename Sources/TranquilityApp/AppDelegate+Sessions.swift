@@ -63,7 +63,7 @@ extension AppDelegate {
             case let .rung(s, _):    session = s; ref = nil
             case let .say(s, _):     session = s; ref = nil
             case .mute:              session = nil; ref = nil
-            case .show, .connect, .new, .unknown: session = nil; ref = nil
+            case .show, .connect, .new, .summon, .unknown: session = nil; ref = nil
             }
             Permissions.log("deeplink: \(action) session=\(session?.prefix(8) ?? "-")")
             var link: [String: TrackValue] = ["action": Track.token(from: action),
@@ -75,6 +75,8 @@ extension AppDelegate {
             hud.acknowledge(.recognized)
 
             switch action {
+            case "summon":
+                if case let .summon(s) = parsed { summon(s) }
             case "discuss":
                 discuss(session: session, ref: ref)
             case "hear":

@@ -167,6 +167,52 @@ extension AppDelegate {
         }
     }
 
+    /// A summons from the Whisper key (25 Sep, SPEC-summons-20260925): the hand
+    /// it names answers, and the answer is spoken on that hand's card. Director
+    /// is asked on channel summons with the context, in its card's thread, so a
+    /// follow-up by hands-free or a tap binds to the same conversation. Yobi1
+    /// has no typed-input door this app can reach: while it runs, its brain is
+    /// asked the same way a tap asks it; when it does not, the card says so.
+    func summon(_ s: DeepLink.Summons) {
+        guard let hands = RightHands.current() else {
+            Permissions.log("summons: no right-hands on this Mac; dropped")
+            return
+        }
+        func id(named name: String) -> String? {
+            hands.order.first { (hands.names[$0] ?? "").caseInsensitiveCompare(name) == .orderedSame }
+        }
+        Permissions.log("summons: to \(s.to) from \(s.app ?? "-"): \(s.text.prefix(80))")
+        if s.to == "yobi1" {
+            guard let yobi = id(named: "Yobi1") else { return }
+            let running = !NSRunningApplication.runningApplications(withBundleIdentifier: "io.yobi.yobi1.fable").isEmpty
+            guard running else {
+                speakOnCard("Yobi1 isn't running, so I couldn't pass that on.", as: yobi, name: "Yobi1", force: true)
+                return
+            }
+            askBrain(s.text, of: yobi, name: "Yobi1")
+            return
+        }
+        guard let director = id(named: "Director") else { return }
+        let thread = hands.hands[director]?.session ?? director
+        hud.showResult("Asking Director…")
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = RightHands.summon(s, thread: thread)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                switch result {
+                case .success(let line) where !line.isEmpty:
+                    Permissions.log("summons: Director answered: \(line.prefix(120))")
+                    self.speakOnCard(line, as: director, name: "Director", force: true)
+                case .success:
+                    Permissions.log("summons: Director chose silence")
+                case .failure(let why):
+                    Permissions.log("summons: Director did not answer: \(why)")
+                    self.hud.showResult("Director didn't answer just now.")
+                }
+            }
+        }
+    }
+
     /// The hands' cards, refreshed in the background when they are stale.
     func refreshHandCards(_ hands: [String: RightHands.Hand]) {
         let carded = hands.filter { $0.value.hasCard }

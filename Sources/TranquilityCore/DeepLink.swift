@@ -146,7 +146,28 @@ public enum DeepLink {
         /// own host, and the hand-back happens over HTTPS between the app and
         /// the hub, where no page can reach it. See `HubPairing`.
         case connect
+        /// The Whisper key's summons (25 Sep, SPEC-summons-20260925): Ahmed held
+        /// the key and said a right-hand's name first; the words go to that hand
+        /// with what he was looking at, and the answer is spoken on its card.
+        /// Read-only on Director's side (status, ready, explain…); nothing here
+        /// can type into an agent.
+        case summon(Summons)
         case unknown(String)
+    }
+
+    public struct Summons: Equatable, Sendable {
+        /// "director" or "yobi1".
+        public var to: String
+        public var text: String
+        public var app: String?
+        public var title: String?
+        public var selection: String?
+        public var pane: String?
+        public init(to: String, text: String, app: String? = nil, title: String? = nil,
+                    selection: String? = nil, pane: String? = nil) {
+            self.to = to; self.text = text; self.app = app; self.title = title
+            self.selection = selection; self.pane = pane
+        }
     }
 
     /// The scheme is deliberately not inspected. `tranquilitybase` is the app's
@@ -171,6 +192,13 @@ public enum DeepLink {
         case "show":    return .show
         case "connect": return .connect
         case "new":     return .new
+        case "summon":
+            guard let text = value("text").map({ String($0.prefix(sayLimit)) }) else { return .unknown("summon") }
+            return .summon(Summons(to: (value("to") ?? "director").lowercased(), text: text,
+                                   app: value("app").map { String($0.prefix(200)) },
+                                   title: value("title").map { String($0.prefix(300)) },
+                                   selection: value("selection").map { String($0.prefix(2000)) },
+                                   pane: value("pane").map { String($0.prefix(80)) }))
         case let other: return .unknown(other)
         }
     }

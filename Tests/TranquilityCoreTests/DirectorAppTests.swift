@@ -34,6 +34,26 @@ final class DirectorAppTests: XCTestCase {
                                                      enabled: false, optional: false))
     }
 
+    /// The Whisper key's summons (25 Sep): the link parses, and Director is
+    /// asked on channel summons, with the context as JSON, in the given thread.
+    func testASummonsLinkBecomesADirectorAskWithItsContext() throws {
+        let url = try XCTUnwrap(URL(string:
+            "tbdirector://summon?to=director&text=what%20is%20ready&app=com.mitchellh.ghostty&pane=fleet/%258"))
+        guard case let .summon(s) = DeepLink.parse(url) else { return XCTFail("not a summons") }
+        XCTAssertEqual(s, DeepLink.Summons(to: "director", text: "what is ready",
+                                           app: "com.mitchellh.ghostty", pane: "fleet/%8"))
+        XCTAssertEqual(RightHands.summonsArgv(s, thread: "ac03daf5"),
+                       ["director", "ask", "what is ready", "--channel", "summons", "--external-id", "ac03daf5",
+                        "--context", #"{"app":"com.mitchellh.ghostty","pane":"fleet\/%8"}"#])
+        if case .summon = DeepLink.parse(URL(string: "tbdirector://summon?to=yobi1")!) {
+            XCTFail("a summons with no words is not one")
+        }
+        guard case let .summon(y) = DeepLink.parse(URL(string: "tbdirector://summon?to=Yobi1&text=hi")!) else {
+            return XCTFail("yobi1")
+        }
+        XCTAssertEqual(y.to, "yobi1")
+    }
+
     func testItsOwnSchemeWins() {
         XCTAssertEqual(AppIdentity.preferredScheme(among: ["tbdirector"], channel: .director, own: "tbdirector"),
                        "tbdirector")
