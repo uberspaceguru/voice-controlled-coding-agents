@@ -719,12 +719,12 @@ extension StatusHUD {
         // with it, and the readback that names them both renders in the strip
         // directly above. Same downward-growth as the strip — a drop extends
         // the panel, it never moves the card.
-        let stack = NSStackView(views: [backButton, stateLabel, titleLabel,
+        let stack = NSStackView(views: [backButton, stateLabel, directorField, titleLabel,
                                         waitingRows, pastList, bodyLabel, cardPayloadView,
                                         stripRule, stripLabel, trayRow, gridFooter,
                                         countdownBar, micRow, meter,
                                         settingsTabs, agentGrid, launchRow, directoryRow,
-                                        voiceList, setupScroll, directorField, hintLabel, buttons])
+                                        voiceList, setupScroll, hintLabel, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6

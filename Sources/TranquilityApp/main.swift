@@ -1373,10 +1373,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.draftFor = { [weak self] session in
             (try? self?.store?.draft(session: session)) ?? nil
         }
-        // The box on the panel: type to Director (27 Sep)
-        if let director = directorHandId {
-            hud.directorSessionId = RightHands.hand(for: director)?.session ?? director
-            hud.onMessageDirector = { [weak self] text in self?.typeToDirector(text, as: director) }
+        // The box on the panel: type to Director (27 Sep). Always on; Director is looked up when he sends,
+        // because the roster is not loaded yet at this point of launch (the box never appeared, 27 Sep 05:43).
+        hud.onMessageDirector = { [weak self] text in
+            guard let self else { return }
+            guard let director = self.directorHandId else {
+                self.hud.showResult("There's no Director on this Mac's roster yet.")
+                return
+            }
+            self.hud.directorSessionId = RightHands.hand(for: director)?.session ?? director
+            self.typeToDirector(text, as: director)
         }
         hud.onSendTyped = { [weak self] text in
             guard let self else { return }
