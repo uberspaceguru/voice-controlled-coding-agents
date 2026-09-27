@@ -286,6 +286,39 @@ extension AppDelegate {
         speakOnCard(answer.line, as: id, name: "Director", force: true)
     }
 
+    /// Typed on Director's card: through the door, like a summons (26 Sep, Ahmed: "if I can't talk, I also need
+    /// the ability to text").
+    func typeToDirector(_ text: String, as id: String) {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty else { return }
+        Permissions.log("door: typed to Director: \(words.prefix(80))")
+        if managerIsOn {
+            showHeard(words)
+            noteConversation("\u{2026}")
+        } else {
+            hud.showResult("Sent to Director\u{2026}")
+        }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = RightHands.converse(words, typed: true)
+            await MainActor.run { [weak self] in
+                switch result {
+                case .success(let answer):
+                    Permissions.log("door: Director answered: \(answer.line.prefix(120))")
+                    self?.presentDirectorTurn(answer, as: id)
+                case .failure(let why):
+                    Permissions.log("door: Director unreachable: \(why)")
+                    self?.hud.showResult("Couldn't reach Director: \(why).")
+                }
+            }
+        }
+    }
+
+    /// The Director hand's id, when the roster has one.
+    var directorHandId: String? {
+        guard let hands = RightHands.current() else { return nil }
+        return hands.order.first(where: { hands.names[$0] == "Director" })
+    }
+
     private func showHeardIfHandsFree(_ text: String) {
         if managerIsOn { showHeard(text) }
     }
@@ -372,7 +405,9 @@ extension AppDelegate {
             hud.showResult("Asking Director…")
         }
         Task.detached(priority: .userInitiated) { [weak self] in
-            let result = RightHands.summon(s, thread: thread)
+            // The door: Director itself answers (26 Sep); `thread` belonged to the old voice brain
+            _ = thread
+            let result = RightHands.converse(s.text, typed: false)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if claimed { self.finishBrainAsk(director) }

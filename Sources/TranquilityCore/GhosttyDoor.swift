@@ -17,12 +17,24 @@ public enum GhosttyDoor {
 
     /// The command, as argv for /usr/bin/open. Pure, for tests.
     public static func openArguments(socket: String, session: String) -> [String] {
-        ["-na", "Ghostty", "--args", "-e", "tmux", "-L", socket, "attach", "-t", session]
+        ["-na", "Ghostty", "--args", "-e", "tmux"] + socketFlag(socket) + ["attach", "-t", session]
+    }
+
+    /// A socket by name (`-L`) or, when it is a path, by path (`-S`).
+    static func socketFlag(_ socket: String) -> [String] {
+        socket.hasPrefix("/") ? ["-S", socket] : ["-L", socket]
+    }
+
+    /// Prod Tranquility's private tmux server, which holds the sessions it started (the Director session among
+    /// them, 26 Sep: Go to Agent and "open it" could not reach any of them).
+    public static var prodSocket: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/VoiceDispatch/tmux/tmux-\(getuid())/tb").path
     }
 
     /// The sockets a session may live on, in the order they are tried: this
-    /// app's own, Director's fleet, then tmux's default server.
-    public static let candidateSockets = [Tmux.socketName, "fleet", "default"]
+    /// app's own, Director's fleet, tmux's default server, then Prod's.
+    public static var candidateSockets: [String] { [Tmux.socketName, "fleet", "default", prodSocket] }
 
     /// The socket that holds a tmux session by this name, or nil. `hasSession`
     /// is the seam; production asks tmux.
@@ -34,7 +46,7 @@ public enum GhosttyDoor {
     public static func tmuxHasSession(socket: String, session: String) -> Bool {
         guard let tmux = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { return false }
-        if case .success = Subprocess.run(tmux, ["-L", socket, "has-session", "-t", "=" + session], timeout: 3) {
+        if case .success = Subprocess.run(tmux, socketFlag(socket) + ["has-session", "-t", "=" + session], timeout: 3) {
             return true
         }
         return false

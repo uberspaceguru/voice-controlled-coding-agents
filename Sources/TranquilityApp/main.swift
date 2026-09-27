@@ -1383,6 +1383,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 lastStatusLine = "nothing to send to yet"
                 return
             }
+            // Typed on Director's card: the door, not a keystroke into a pane this app may not reach (26 Sep)
+            if let director = directorHandId,
+               target.sessionId == director || RightHands.hand(for: target.sessionId)?.name == "Director" {
+                typeToDirector(text, as: director)
+                return
+            }
             Task { @MainActor in _ = await self.sendTyped(text, to: target.sessionId) }
         }
         hud.onItemsStaged = { [weak self] items, via in

@@ -48,6 +48,8 @@ public enum CardPayload: Equatable, Sendable {
     case item(Item)
     case action(PendingActions.Action)
     case screen(agent: String?, lines: [String])
+    /// The rest of Director's reply after the sentences it spoke (the door, 26 Sep), as prose.
+    case text(String)
 
     /// The most rows and screen lines the card draws.
     public static let mostRows = 6
@@ -91,6 +93,9 @@ public enum CardPayload: Equatable, Sendable {
             guard let data = try? JSONSerialization.data(withJSONObject: [row]),
                   let action = PendingActions.parse(data)?.first else { return nil }
             return .action(action)
+        case "text":
+            guard let t = text(o["text"]) else { return nil }
+            return .text(String(t.prefix(4000)))
         case "screen":
             let lines = (o["lines"] as? [String]) ?? (text(o["text"])?.components(separatedBy: "\n") ?? [])
             return lines.isEmpty ? nil : .screen(agent: text(o["agent"]), lines: Array(lines.suffix(mostLines)))

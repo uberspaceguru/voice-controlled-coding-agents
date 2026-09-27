@@ -76,6 +76,32 @@ final class RightHandsBrainTests: XCTestCase {
         }
     }
 
+    /// 26 Sep: what he types or says to Director goes through the door and Director's own reply comes back.
+    func testTheDoorSpeaksTwoSentencesAndCardsTheRest() {
+        var ran: [String] = []
+        let out = #"{"ok":true,"reply":"Opened it. TeamChat waits on a yes. Two more.","spoken":"Opened it. TeamChat waits on a yes.","pending":false,"card_json":{"kind":"text","text":"Two more."}}"#
+        let r = RightHands.converse("open TeamChat", typed: true) { _, args, _ in ran = args; return .success(out) }
+        XCTAssertEqual(ran, ["--json", "converse", "open TeamChat", "--typed", "--wait", "150"])
+        let answer = try? r.get()
+        XCTAssertEqual(answer?.line, "Opened it. TeamChat waits on a yes.")
+        guard case .text(let rest)? = CardPayload.parse(json: answer?.card) else { return XCTFail("the rest on the card") }
+        XCTAssertEqual(rest, "Two more.")
+        let pending = RightHands.converse("x", typed: false) { _, _, _ in .success(#"{"ok":true,"pending":true,"reply":""}"#) }
+        XCTAssertEqual(try? pending.get().line, RightHands.stillWorking)
+        let down = RightHands.converse("x", typed: false) { _, _, _ in
+            .success(#"{"ok":false,"why":"the Director session has no tmux pane any server here can reach"}"#)
+        }
+        guard case .failure(.failed(let why)) = down else { return XCTFail("unreachable is a failure with its reason") }
+        XCTAssertTrue(why.contains("tmux pane"))
+    }
+
+    func testGoToAgentReachesProdsPrivateServerByPath() {
+        XCTAssertEqual(GhosttyDoor.openArguments(socket: "/tmp/x/tb", session: "tb-fad17677"),
+                       ["-na", "Ghostty", "--args", "-e", "tmux", "-S", "/tmp/x/tb", "attach", "-t", "tb-fad17677"])
+        XCTAssertEqual(GhosttyDoor.openArguments(socket: "fleet", session: "w1").suffix(5), ["-L", "fleet", "attach", "-t", "w1"])
+        XCTAssertTrue(GhosttyDoor.candidateSockets.last?.hasSuffix("VoiceDispatch/tmux/tmux-\(getuid())/tb") == true)
+    }
+
     func testAskRunsTheTemplateAndTrimsTheAnswer() {
         let hand = RightHands.Hand(name: "Director", ask: ["/bin/echo", "heard:", "{text}"])
         XCTAssertEqual(RightHands.ask(hand, text: "what needs me?", conversation: "c", session: director),

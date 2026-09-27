@@ -450,6 +450,44 @@ public enum RightHands {
         }
     }
 
+    /// The door (26 Sep, Ahmed: "a voice layer on top of the Director I have right now"): his words go to
+    /// Director (`director converse`, which types them into the Director session, or runs a turn of it when it is
+    /// not running) and its own reply comes back: `line` is what is spoken (two sentences), `card` the rest as a
+    /// text payload. A turn still running after `wait` comes back saying so. Blocking: call it detached.
+    public static let doorWait: TimeInterval = 150
+    public static let stillWorking = "Director is still working on that; the answer will be in its window."
+
+    public static func converseArgv(_ text: String, typed: Bool, wait: TimeInterval = doorWait) -> [String] {
+        ["director", "--json", "converse", text] + (typed ? ["--typed"] : []) + ["--wait", String(Int(wait))]
+    }
+
+    public static func converse(_ text: String, typed: Bool, wait: TimeInterval = doorWait,
+                                run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
+                                    Subprocess.run($0, $1, timeout: $2)
+                                }) -> Result<Answer, AskFailure> {
+        let argv = converseArgv(text, typed: typed, wait: wait)
+        guard let program = executable(argv[0]) else { return .failure(.failed("director is not on this Mac")) }
+        switch run(program, Array(argv.dropFirst()), wait + 20) {
+        case .success(let out):
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any] else {
+                return .failure(.failed("director answered no JSON"))
+            }
+            guard obj["ok"] as? Bool == true else {
+                return .failure(.failed((obj["why"] as? String) ?? "Director could not be reached"))
+            }
+            if obj["pending"] as? Bool == true { return .success(Answer(line: stillWorking)) }
+            var card: String?
+            if let raw = obj["card_json"], !(raw is NSNull), let d = try? JSONSerialization.data(withJSONObject: raw) {
+                card = String(decoding: d, as: UTF8.self)
+            }
+            let line = ((obj["spoken"] as? String) ?? (obj["reply"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return .success(Answer(line: line, card: card))
+        case .failure(let error):
+            return .failure(.failed(error.message.isEmpty ? "director failed" : error.message))
+        }
+    }
+
     /// A summons asked of Director (25 Sep, SPEC-summons-20260925): `director ask`
     /// on channel summons, the context as JSON, in `thread`. Pure, for tests.
     public static func summonsArgv(_ s: DeepLink.Summons, thread: String) -> [String] {

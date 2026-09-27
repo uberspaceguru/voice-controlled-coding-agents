@@ -23,6 +23,9 @@ enum CardPayloadRows {
             out.append(actionView(a, target: target, action: action))
         case .screen(let agent, let lines):
             out.append(screenView(agent: agent, lines: lines, target: target, action: action))
+        case .text(let prose):
+            out.append(label(NSAttributedString(string: prose, attributes: [
+                .font: StateLegend.Face.message(12), .foregroundColor: StateLegend.Palette.secondary]), lines: 24))
         }
         return out
     }
