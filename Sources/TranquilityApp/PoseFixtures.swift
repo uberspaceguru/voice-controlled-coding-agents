@@ -147,6 +147,7 @@ extension StatusHUD {
             setManager(on: true)
             setManagerState(Self.orbState, line: "speaking", mood: "speaking")
             conversationCard = true
+            onMessageDirector = { _ in }
             setCardPayload(CardPayload.parse(json: Self.payloadPoses[name]))
             let line = "Ten things need you; first, the Jev pilot worker needs approval to send private repo metadata."
             let spoken = SpokenTextSanitizer().sanitize(line, allowing: ["Director", "Jev"])
@@ -167,6 +168,7 @@ extension StatusHUD {
             highlight(upTo: spoken.text.count)
 
         case "right-hands-handsfree":
+            onMessageDirector = { _ in }            // the box to type to Director (27 Sep)
             // tb-handsfree-ui (25 Sep): hands-free on, the four rows kept with
             // their dots, upstream's orb and its line above STOP HANDS-FREE.
             setManager(on: true)

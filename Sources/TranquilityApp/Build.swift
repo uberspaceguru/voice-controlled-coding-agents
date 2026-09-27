@@ -724,7 +724,7 @@ extension StatusHUD {
                                         stripRule, stripLabel, trayRow, gridFooter,
                                         countdownBar, micRow, meter,
                                         settingsTabs, agentGrid, launchRow, directoryRow,
-                                        voiceList, setupScroll, hintLabel, buttons])
+                                        voiceList, setupScroll, directorField, hintLabel, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
@@ -884,6 +884,7 @@ extension StatusHUD {
         NSLayoutConstraint.activate(stackEdges + [
             bodyLabel.widthAnchor.constraint(equalToConstant: 348),
             hintLabel.widthAnchor.constraint(equalToConstant: 348),
+            directorField.widthAnchor.constraint(equalToConstant: 348),
             stripLabel.widthAnchor.constraint(equalToConstant: 348),
             stripRule.widthAnchor.constraint(equalToConstant: 348),
             titleLabel.widthAnchor.constraint(equalToConstant: 348),

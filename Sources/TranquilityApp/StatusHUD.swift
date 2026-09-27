@@ -2498,6 +2498,7 @@ final class StatusHUD: NSObject {
         stripLabel.stringValue = ""
         voiceList.isHidden = true; waitingRows.isHidden = true
         cardPayloadView?.isHidden = true
+        if !directorField.isHidden, directorField.currentEditor() == nil { directorField.isHidden = true }
         setupChecklist?.isHidden = true; setupScroll?.isHidden = true
         pastList?.isHidden = true
         pastBackButton?.isHidden = true
@@ -2566,6 +2567,9 @@ final class StatusHUD: NSObject {
                 rebuildConversationRows()
                 waitingRows.isHidden = false
             }
+            if conversationCard || (directorSessionId != nil && currentTarget?.sessionId == directorSessionId) {
+                showDirectorField()
+            }
             if cardPayload != nil && ((conversationCard && managerOn)
                                       || (cardPayloadSession != nil && cardPayloadSession == currentTarget?.sessionId)) {
                 showCardPayload()
@@ -2597,6 +2601,7 @@ final class StatusHUD: NSObject {
             stateLabel.attributedStringValue = stripTitle
             hintLabel.font = StateLegend.Face.chrome(9.5)
             gridFooter.isHidden = false
+            showDirectorField()
             waitingRows.isHidden = false
             collapseButton?.isHidden = isCollapsed
             // Ask the pointer where it actually is, once, as the grid arms. A
@@ -3415,6 +3420,31 @@ final class StatusHUD: NSObject {
     /// card, not the list (26 Sep, Ahmed: the list during a conversation is
     /// useless). Set by the app; the list comes back after 60 s of silence.
     var conversationCard = false
+
+    /// Type to Director, always on the panel's list and on Director's card (27 Sep). Set by the app when the
+    /// roster has a Director.
+    lazy var directorField: DirectorField = {
+        let field = DirectorField()
+        field.isHidden = true
+        field.onWantsKeyboard = { [weak self, weak field] in
+            guard let self, let panel = self.panel, let field else { return }
+            if !panel.acceptsKey {
+                panel.acceptsKey = true
+                panel.makeKeyAndOrderFront(nil)
+            }
+            panel.makeFirstResponder(field)
+        }
+        field.onSubmit = { [weak self] text in self?.onMessageDirector?(text) }
+        field.onDone = { [weak self] in self?.releaseKeyboard() }
+        return field
+    }()
+    var onMessageDirector: ((String) -> Void)?
+    var directorSessionId: String?
+
+    private func showDirectorField() {
+        guard onMessageDirector != nil else { return }
+        directorField.isHidden = false
+    }
 
     /// What the conversation card draws under the sentence (M26): the last
     /// Director turn's payload, until the next turn replaces or clears it.

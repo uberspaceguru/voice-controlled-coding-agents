@@ -1373,6 +1373,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.draftFor = { [weak self] session in
             (try? self?.store?.draft(session: session)) ?? nil
         }
+        // The box on the panel: type to Director (27 Sep)
+        if let director = directorHandId {
+            hud.directorSessionId = RightHands.hand(for: director)?.session ?? director
+            hud.onMessageDirector = { [weak self] text in self?.typeToDirector(text, as: director) }
+        }
         hud.onSendTyped = { [weak self] text in
             guard let self else { return }
             // The write resolves its own target. The panel asked already;
