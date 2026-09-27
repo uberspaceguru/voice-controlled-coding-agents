@@ -280,8 +280,10 @@ extension AppDelegate {
             return
         }
         if managerIsOn {
-            hud.conversationCard = true
-            armConversationIdle()
+            // One voice: with hands-free on only the hands-free voice speaks (the microphone cancels its own voice
+            // and nothing else). A typed or Whisper-key answer is shown on the card.
+            noteConversation(answer.line)
+            return
         }
         speakOnCard(answer.line, as: id, name: "Director", force: true)
     }
@@ -347,6 +349,11 @@ extension AppDelegate {
     /// The opening sentence, spoken while the grid stays up, so the lines it
     /// introduces are right there to tap.
     private func speakOverGrid(_ text: String, as id: String, name: String) {
+        // One voice (27 Sep, Ahmed: "why are all these voices coming through?"): opening a row never reads its
+        // summary aloud in a voice of its own; the lines are on the panel. It was also heard by the hands-free
+        // microphone as if he had said it.
+        Permissions.log("right-hands: \(name) opened; not read aloud: \(text.prefix(80))")
+        return
         guard let coordinator else { return }
         let spoken = SpokenTextSanitizer().sanitize(
             text, allowing: SpokenTextSanitizer.speakableTerms(in: text).union([name]))
