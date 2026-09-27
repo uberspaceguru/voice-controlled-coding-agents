@@ -772,7 +772,8 @@ class Manager(DialogueManagerMixin, FrameProcessor):
             return
         await emit(self, "tool", argv=[name, words[:80]], meaning=f"asking {name}")
         asked = time.monotonic()
-        ask = asyncio.ensure_future(_run(*argv, timeout=60))
+        slow = name == "Director" and director_link.door_on()      # the Director session takes its time
+        ask = asyncio.ensure_future(_run(*argv, timeout=director_link.DOOR_WAIT_SECS + 20 if slow else 60))
         try:
             if director_link.director_default():
                 await self._bridge_while(ask, name, words, asked)

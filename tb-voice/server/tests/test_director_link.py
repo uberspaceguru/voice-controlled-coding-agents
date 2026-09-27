@@ -3,6 +3,8 @@ import os
 import sys
 import unittest
 
+os.environ.setdefault("TB_DIRECTOR_DOOR", "ask")   # these cover the voice brain; the door has its own tests
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import director_link as d  # noqa: E402
@@ -600,6 +602,27 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(d.media_playing(path, now=1001.0))
         self.assertIsNone(d.route_default("what needs me?", names=[], name_only=True))
         self.assertEqual(d.route_default("Director, what needs me?", names=[], name_only=True), ("ask", "what needs me?"))
+
+    async def test_the_door_speaks_directors_own_two_sentences_and_cards_the_rest(self):
+        # 26 Sep, Ahmed: a voice layer on top of the Director he has; the Director session answers
+        from unittest.mock import AsyncMock, patch
+        env = {"TB_RIGHT_HAND_CARDS": "1", "TB_DEFAULT_INTERLOCUTOR": "director", "TB_DIRECTOR_DOOR": "converse"}
+        door = {"ok": True, "reply": "Opened it. TeamChat is waiting on a yes. Also two more.", "pending": False,
+                "spoken": "Opened it. TeamChat is waiting on a yes.",
+                "card_json": {"kind": "text", "text": "Also two more."}}
+        run = AsyncMock(side_effect=[(0, json.dumps(door)),
+                                     (0, json.dumps({"ok": True, "reply": "", "spoken": "", "pending": True}))])
+        emit = AsyncMock()
+        with patch.dict(os.environ, env), patch("manager._run", run), patch("manager.emit", emit), \
+                patch("dialogue_manager.emit", AsyncMock()):
+            await self.m._dialogue_turn("Director, open TeamChat for me", None, None)
+            await self.m._dialogue_turn("and restart the iOS worker", None, None)
+        argv = run.await_args_list[0].args
+        self.assertEqual(argv[1:4], ("--json", "converse", "open TeamChat for me"))
+        self.assertEqual([c.args[0] for c in self.m._say.await_args_list],
+                         ["Opened it. TeamChat is waiting on a yes.", d.STILL_WORKING])
+        cards = [c.kwargs.get("card") for c in emit.await_args_list if c.args[1:] == ("card",)]
+        self.assertEqual(json.loads(cards[0]), {"kind": "text", "text": "Also two more."})
 
     def test_what_counts_as_a_hearing_check(self):
         for yes in ("Hello?", "Director?", "Hello. Director, you there?", "are you there", "Tranquility, can you hear me?",

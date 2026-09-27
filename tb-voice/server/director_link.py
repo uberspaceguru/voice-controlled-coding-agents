@@ -509,7 +509,19 @@ def director_bin() -> str:
             or os.path.expanduser("~/.local/bin/director"))
 
 
+# The door (26 Sep, Ahmed: "a voice layer on top of the Director I have right now"): what he says to Director goes
+# to the Director session itself (`director converse`), which acts with everything it has, instead of the voice
+# brain (`director ask`), which refused. TB_DIRECTOR_DOOR=ask brings the old brain back.
+DOOR_WAIT_SECS = 150
+
+
+def door_on() -> bool:
+    return os.getenv("TB_DIRECTOR_DOOR", "converse").strip().lower() != "ask"
+
+
 def ask_argv(text: str, thread: str | None = None, named: bool = False) -> list[str]:
+    if door_on():
+        return [director_bin(), "--json", "converse", text, "--wait", str(DOOR_WAIT_SECS)]
     # --json: Director says what the turn was, not only what to say (close, incomplete; 26 Sep).
     # --named: this voice heard his name for Director and took it off the words, so Director must not judge the
     # bare words again ("can you hear me?" alone scored 0.28 and was dropped, 25 Sep 22:45).
@@ -533,12 +545,18 @@ def director_reply(out: str) -> tuple[str, dict]:
         d = json.loads(out)
     except (ValueError, TypeError):
         return out, {}
+    if isinstance(d, dict) and "spoken" in d:
+        # the door: speak its two sentences; the rest is on the card
+        if d.get("pending"):
+            return STILL_WORKING, d
+        return d.get("spoken") or "", d
     if isinstance(d, dict) and "reply" in d:
         return d.get("reply") or "", d
     return out, {}
 
 
-CARD_KINDS = ("list", "item", "action", "screen")
+CARD_KINDS = ("list", "item", "action", "screen", "text")
+STILL_WORKING = "Director is still working on that; the answer will be in its window."
 
 
 def card_payload(flags: dict) -> str:

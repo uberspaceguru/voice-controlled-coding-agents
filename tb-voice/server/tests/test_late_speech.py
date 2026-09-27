@@ -5,6 +5,8 @@ import asyncio
 import os
 import time
 import unittest
+
+os.environ.setdefault("TB_DIRECTOR_DOOR", "ask")   # these cover the voice brain; the door has its own tests
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
