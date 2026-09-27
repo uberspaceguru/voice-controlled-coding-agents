@@ -512,7 +512,7 @@ def director_bin() -> str:
 # The door (26 Sep, Ahmed: "a voice layer on top of the Director I have right now"): what he says to Director goes
 # to the Director session itself (`director converse`), which acts with everything it has, instead of the voice
 # brain (`director ask`), which refused. TB_DIRECTOR_DOOR=ask brings the old brain back.
-DOOR_WAIT_SECS = 150
+DOOR_WAIT_SECS = 45        # the door answers from the quick brain (2-4 s); doing is handed to Director behind it
 
 
 def door_on() -> bool:
@@ -521,7 +521,8 @@ def door_on() -> bool:
 
 def ask_argv(text: str, thread: str | None = None, named: bool = False) -> list[str]:
     if door_on():
-        return [director_bin(), "--json", "converse", text, "--wait", str(DOOR_WAIT_SECS)]
+        return ([director_bin(), "--json", "converse", text] + (["--named"] if named else [])
+                + ["--thread", thread or session_thread()])
     # --json: Director says what the turn was, not only what to say (close, incomplete; 26 Sep).
     # --named: this voice heard his name for Director and took it off the words, so Director must not judge the
     # bare words again ("can you hear me?" alone scored 0.28 and was dropped, 25 Sep 22:45).

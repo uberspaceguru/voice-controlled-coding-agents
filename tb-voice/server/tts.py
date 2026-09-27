@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.gradium.tts import GradiumTTSService
 
 from exact_speech import DialogueSpeakFrame, ExactSpeakFrame
@@ -25,7 +26,10 @@ _speech = ContextVar("dialogue_speech", default=None)
 MAX_CONTEXT_GUARDS = 128
 
 
-class SpokenGradiumTTSService(GradiumTTSService):
+class SpokenTTSMixin:
+    """The spoken-text rules and the delivery book, on any provider whose audio context ends with a
+    TTSStoppedFrame (Gradium's end_of_stream, ElevenLabs' isFinal)."""
+
     def _bind_delivery(self, context_id, generated_text=""):
         book = getattr(self, "deliverybook", None)
         delivery = getattr(_speech.get(), "delivery", None)
@@ -205,3 +209,11 @@ class SpokenGradiumTTSService(GradiumTTSService):
         except Exception:
             self._settle_delivery(context_id, "failed", "provider_request_failed")
             raise
+
+
+class SpokenGradiumTTSService(SpokenTTSMixin, GradiumTTSService):
+    pass
+
+
+class SpokenElevenLabsTTSService(SpokenTTSMixin, ElevenLabsTTSService):
+    """Director's voice in the Director app's ElevenLabs voice (27 Sep: Gradium ran out of credits)."""

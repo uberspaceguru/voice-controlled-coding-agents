@@ -42,9 +42,63 @@ from mute import WhileBotSpeaksMuteStrategy
 from prompt import SYSTEM
 from speech_delivery import OutputDeliveryObserver
 from tools import SCHEMAS
-from tts import SpokenGradiumTTSService
-from turn_end import ForecastGradiumSTTService, ForecastTurnStopStrategy
+from tts import SpokenElevenLabsTTSService, SpokenGradiumTTSService
+from turn_end import EndOfTurnSignal, ForecastGradiumSTTService, ForecastTurnStopStrategy
 from words_tap import WordsTap
+
+
+# Ears and mouth (27 Sep: Gradium's streaming transcriber billed every minute the microphone was open, all day,
+# and ran out of credits; hands-free went deaf). By default the ears are on this Mac: local VAD finds speech and
+# MLX Whisper transcribes only that, at no cost. The mouth is ElevenLabs in the Director app's voice. TB_STT=gradium
+# and TB_TTS=gradium bring the old ones back.
+WHISPER_MODEL = os.getenv("TB_WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
+ELEVEN_KEY_FILE = os.path.expanduser("~/.yobi1/elevenlabs.key")
+ELEVEN_FALLBACK_VOICE = "EXAVITQu4vr4xnSDxMaL"
+
+
+def _eleven_key() -> str | None:
+    if os.getenv("ELEVENLABS_API_KEY"):
+        return os.environ["ELEVENLABS_API_KEY"].strip()
+    try:
+        with open(ELEVEN_KEY_FILE) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def _eleven_voice() -> str:
+    """The Director app's own ElevenLabs voice (its VoiceCatalog default), else its fallback."""
+    import re
+    import subprocess
+    try:
+        v = subprocess.run(["defaults", "read", "com.robertnowell.voice-dispatch.shared", "elevenLabsVoiceId"],
+                           capture_output=True, text=True, timeout=3).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        v = ""
+    return os.getenv("TB_ELEVEN_VOICE") or (v if re.fullmatch(r"[A-Za-z0-9]{10,40}", v) else ELEVEN_FALLBACK_VOICE)
+
+
+def make_ears():
+    """(the transcriber, the end-of-turn forecast it feeds; an idle one when it has none)."""
+    if os.getenv("TB_STT", "local").strip().lower() == "gradium":
+        stt = ForecastGradiumSTTService(api_key=os.environ["GRADIUM_API_KEY"])
+        return stt, stt.forecast
+    from local_stt import LocalWhisperSTTService
+    logger.info(f"ears: local MLX Whisper ({WHISPER_MODEL}); nothing is streamed anywhere")
+    return LocalWhisperSTTService(model=WHISPER_MODEL), EndOfTurnSignal()
+
+
+def make_mouth():
+    key = _eleven_key()
+    if os.getenv("TB_TTS", "elevenlabs" if key else "gradium").strip().lower() == "elevenlabs" and key:
+        voice = _eleven_voice()
+        logger.info(f"mouth: ElevenLabs voice {voice}")
+        return SpokenElevenLabsTTSService(api_key=key, voice_id=voice, model=os.getenv("TB_ELEVEN_MODEL",
+                                                                                     "eleven_flash_v2_5"))
+    return SpokenGradiumTTSService(
+        api_key=os.environ["GRADIUM_API_KEY"],
+        settings=GradiumTTSService.Settings(voice=os.getenv("GRADIUM_VOICE_ID") or None),
+    )
 
 
 def _idle_timeout() -> float | None:
@@ -66,11 +120,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     if cancels_echo:
         logger.info("client cancels its own echo: the gate is open and Director can be interrupted")
 
-    stt = ForecastGradiumSTTService(api_key=os.environ["GRADIUM_API_KEY"])
-    tts = SpokenGradiumTTSService(
-        api_key=os.environ["GRADIUM_API_KEY"],
-        settings=GradiumTTSService.Settings(voice=os.getenv("GRADIUM_VOICE_ID") or None),
-    )
+    stt, forecast = make_ears()
+    tts = make_mouth()
+    if hasattr(stt, "warm"):
+        asyncio.get_event_loop().create_task(stt.warm())       # the model loads before he speaks
     llm = RecordedLLMService(
         api_key=os.environ["GC_API_KEY"],
         base_url=os.getenv("GC_BASE_URL", "https://api.generalcompute.com/v1"),
@@ -122,7 +175,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
                 # hold the floor ("and", "to", "um") wait 2.5 s of silence; silence
                 # alone ends it after 2.5 s (turn_end.py). A 1.0-1.2 s silence rule
                 # split 24 of Ahmed's turns mid-sentence on 25 Sep.
-                stop=[ForecastTurnStopStrategy(stt.forecast)]
+                stop=[ForecastTurnStopStrategy(forecast)]
             ),
         ),
     )
