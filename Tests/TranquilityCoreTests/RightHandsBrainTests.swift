@@ -80,8 +80,10 @@ final class RightHandsBrainTests: XCTestCase {
     func testTheDoorSpeaksTwoSentencesAndCardsTheRest() {
         var ran: [String] = []
         let out = #"{"ok":true,"reply":"Opened it. TeamChat waits on a yes. Two more.","spoken":"Opened it. TeamChat waits on a yes.","pending":false,"card_json":{"kind":"text","text":"Two more."}}"#
-        let r = RightHands.converse("open TeamChat", typed: true) { _, args, _ in ran = args; return .success(out) }
-        XCTAssertEqual(ran, ["--json", "converse", "open TeamChat", "--typed", "--wait", "150"])
+        let r = RightHands.converse("open TeamChat", typed: true, thread: "ac03") { _, args, _ in
+            ran = args; return .success(out)
+        }
+        XCTAssertEqual(ran, ["--json", "converse", "open TeamChat", "--typed", "--thread", "ac03"])
         let answer = try? r.get()
         XCTAssertEqual(answer?.line, "Opened it. TeamChat waits on a yes.")
         guard case .text(let rest)? = CardPayload.parse(json: answer?.card) else { return XCTFail("the rest on the card") }

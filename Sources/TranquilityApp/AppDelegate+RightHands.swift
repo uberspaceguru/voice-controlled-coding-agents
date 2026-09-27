@@ -298,8 +298,9 @@ extension AppDelegate {
         } else {
             hud.showResult("Sent to Director\u{2026}")
         }
+        let thread = RightHands.hand(for: id)?.session ?? id
         Task.detached(priority: .userInitiated) { [weak self] in
-            let result = RightHands.converse(words, typed: true)
+            let result = RightHands.converse(words, typed: true, thread: thread)
             await MainActor.run { [weak self] in
                 switch result {
                 case .success(let answer):
@@ -407,7 +408,7 @@ extension AppDelegate {
         Task.detached(priority: .userInitiated) { [weak self] in
             // The door: Director itself answers (26 Sep); `thread` belonged to the old voice brain
             _ = thread
-            let result = RightHands.converse(s.text, typed: false)
+            let result = RightHands.converse(s.text, typed: false, thread: thread)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if claimed { self.finishBrainAsk(director) }

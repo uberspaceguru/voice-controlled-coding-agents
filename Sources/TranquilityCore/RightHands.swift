@@ -454,20 +454,22 @@ public enum RightHands {
     /// Director (`director converse`, which types them into the Director session, or runs a turn of it when it is
     /// not running) and its own reply comes back: `line` is what is spoken (two sentences), `card` the rest as a
     /// text payload. A turn still running after `wait` comes back saying so. Blocking: call it detached.
-    public static let doorWait: TimeInterval = 150
+    /// The door answers from Director's quick brain (2-4 s) and hands anything it would refuse to the Director
+    /// session itself, whose reply is announced later (27 Sep, Ahmed: 10-60 s is not a conversation).
+    public static let doorWait: TimeInterval = 45
     public static let stillWorking = "Director is still working on that; the answer will be in its window."
 
-    public static func converseArgv(_ text: String, typed: Bool, wait: TimeInterval = doorWait) -> [String] {
-        ["director", "--json", "converse", text] + (typed ? ["--typed"] : []) + ["--wait", String(Int(wait))]
+    public static func converseArgv(_ text: String, typed: Bool, thread: String? = nil) -> [String] {
+        ["director", "--json", "converse", text] + (typed ? ["--typed"] : []) + (thread.map { ["--thread", $0] } ?? [])
     }
 
-    public static func converse(_ text: String, typed: Bool, wait: TimeInterval = doorWait,
+    public static func converse(_ text: String, typed: Bool, thread: String? = nil, wait: TimeInterval = doorWait,
                                 run: (String, [String], TimeInterval) -> Result<String, ScriptError> = {
                                     Subprocess.run($0, $1, timeout: $2)
                                 }) -> Result<Answer, AskFailure> {
-        let argv = converseArgv(text, typed: typed, wait: wait)
+        let argv = converseArgv(text, typed: typed, thread: thread)
         guard let program = executable(argv[0]) else { return .failure(.failed("director is not on this Mac")) }
-        switch run(program, Array(argv.dropFirst()), wait + 20) {
+        switch run(program, Array(argv.dropFirst()), wait) {
         case .success(let out):
             guard let obj = (try? JSONSerialization.jsonObject(with: Data(out.utf8))) as? [String: Any] else {
                 return .failure(.failed("director answered no JSON"))
@@ -482,7 +484,7 @@ public enum RightHands {
             }
             let line = ((obj["spoken"] as? String) ?? (obj["reply"] as? String) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return .success(Answer(line: line, card: card))
+            return .success(Answer(line: line, card: card, close: obj["close"] as? Bool ?? false))
         case .failure(let error):
             return .failure(.failed(error.message.isEmpty ? "director failed" : error.message))
         }
