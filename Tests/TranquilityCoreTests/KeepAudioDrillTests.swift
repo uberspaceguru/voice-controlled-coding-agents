@@ -19,15 +19,20 @@ final class KeepAudioDrillTests: XCTestCase {
 
     /// Leaves nothing behind — the drill writes only under its own temp root.
     func testDrillLeavesNoResidueInTheTempRoot() throws {
-        let before = temporaryChildCount()
-        _ = try KeepAudioDrill.run()
-        XCTAssertEqual(temporaryChildCount(), before,
-                       "the drill must clean up its throwaway root")
-    }
+        let fm = FileManager.default
+        let fixture = fm.temporaryDirectory
+            .appendingPathComponent("keep-drill-test-\(UUID().uuidString)", isDirectory: true)
+        let parent = fixture.appendingPathComponent("drills", isDirectory: true)
+        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: fixture) }
+        let sibling = fixture.appendingPathComponent("unrelated.txt")
+        let sentinel = Data("keep this sibling".utf8)
+        try sentinel.write(to: sibling)
 
-    private func temporaryChildCount() -> Int {
-        let root = FileManager.default.temporaryDirectory
-        let kids = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
-        return kids.filter { $0.hasPrefix("tb-keep-drill-") }.count
+        _ = try KeepAudioDrill.run(temporaryDirectory: parent)
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: parent.path), [],
+                       "the drill must clean up its throwaway root")
+        XCTAssertEqual(try Data(contentsOf: sibling), sentinel,
+                       "cleanup must not remove or change a sibling outside the drill parent")
     }
 }

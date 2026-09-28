@@ -41,9 +41,10 @@ public enum KeepAudioDrill {
         return data
     }
 
-    public static func run(now: Date = Date()) throws -> [Group] {
+    public static func run(now: Date = Date(),
+                           temporaryDirectory: URL = FileManager.default.temporaryDirectory) throws -> [Group] {
         let fm = FileManager.default
-        let root = fm.temporaryDirectory
+        let root = temporaryDirectory
             .appendingPathComponent("tb-keep-drill-\(UUID().uuidString)", isDirectory: true)
         let audio = root.appendingPathComponent("audio", isDirectory: true)
         defer { try? fm.removeItem(at: root) }
