@@ -36,9 +36,10 @@ final class PullRequestInTheHubTests: XCTestCase {
     }
 
     private func pr(_ number: Int, state: String = "OPEN",
-                    approvals: Int = 0, decision: String? = nil) -> GitHubPullRequests.PR {
+                    approvals: Int = 0, decision: String? = nil,
+                    repository: String? = nil) -> GitHubPullRequests.PR {
         .init(number: number, title: "The grid lights its words", state: state,
-              url: "https://github.com/\(repo)/pull/\(number)",
+              url: "https://github.com/\(repository ?? repo)/pull/\(number)",
               approvals: approvals, reviewDecision: decision)
     }
 
@@ -163,20 +164,37 @@ final class PullRequestInTheHubTests: XCTestCase {
                       topic: "the grid's words", happened: "Opened it.", branch: branch)
     }
 
-    func testThePullRequestIsOnThePageWithItsState() {
-        stub(pr(117, state: "OPEN", approvals: 2))
-        GitHubPullRequests.prime(repo: repo, branch: "ui/grid")
-        let html = HomeBase.render(model([turn(branch: "ui/grid")],
-                                         cwd: FileManager.default.currentDirectoryPath))
-        // Only assert the PR row when this checkout actually resolves a repo;
-        // the row is keyed on that, and a machine without an origin remote is
-        // a legitimate environment rather than a failure.
-        guard GitRemote.slug(cwd: FileManager.default.currentDirectoryPath) != nil else {
-            return XCTAssertFalse(html.contains("class=\"pr\""))
+    /// The cache key and the rendered checkout must name the same repository,
+    /// regardless of which fork (or directory) is running this test suite.
+    private func repositoryFixture(_ repository: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vd-hub-pr-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        var prepared = false
+        defer { if !prepared { try? FileManager.default.removeItem(at: directory) } }
+        _ = try XCTUnwrap(GitRemote.run(
+            ["-C", directory.path, "init", "--quiet", "--template="], cwd: directory.path))
+        _ = try XCTUnwrap(GitRemote.run(
+            ["-C", directory.path, "config", "--local", "remote.origin.url",
+             "https://github.com/\(repository).git"], cwd: directory.path))
+        XCTAssertEqual(GitRemote.slug(cwd: directory.path), repository)
+        prepared = true
+        return directory
+    }
+
+    func testThePullRequestIsOnThePageWithItsState() throws {
+        for repository in [repo, "fixture-fork/voice-controlled-coding-agents"] {
+            let directory = try repositoryFixture(repository)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            stub(pr(117, state: "OPEN", approvals: 2, repository: repository))
+            GitHubPullRequests.prime(repo: repository, branch: "ui/grid")
+            let html = HomeBase.render(model([turn(branch: "ui/grid")],
+                                             cwd: directory.path))
+            XCTAssertTrue(html.contains("PR #117"))
+            XCTAssertTrue(html.contains("open · 2 approvals"))
+            XCTAssertTrue(html.contains("/pull/117"))
+            XCTAssertTrue(html.contains("https://github.com/\(repository)/pull/117"))
         }
-        XCTAssertTrue(html.contains("PR #117"))
-        XCTAssertTrue(html.contains("open · 2 approvals"))
-        XCTAssertTrue(html.contains("/pull/117"))
     }
 
     /// No branch, no row. The turn renders exactly as it did before any of
@@ -264,18 +282,19 @@ final class PullRequestInTheHubTests: XCTestCase {
     /// same pull request nine times down the page — which is the complaint
     /// that started the rewrite, wearing different clothes. Once per branch,
     /// on the newest turn that used it.
-    func testTheRowPrintsOncePerBranchNotPerTurn() {
-        let cwd = FileManager.default.currentDirectoryPath
-        try? XCTSkipIf(GitRemote.slug(cwd: cwd) == nil, "no origin remote here")
-        guard GitRemote.slug(cwd: cwd) != nil else { return }
-        stub(pr(117))
-        GitHubPullRequests.prime(repo: repo, branch: "ui/grid")
-        let turns = (0..<5).map {
-            HomeBase.Turn(at: Date(timeIntervalSince1970: 1_755_530_000 - Double($0) * 600),
-                          topic: "turn \($0)", happened: "Did it.", branch: "ui/grid")
+    func testTheRowPrintsOncePerBranchNotPerTurn() throws {
+        for repository in [repo, "fixture-fork/voice-controlled-coding-agents"] {
+            let directory = try repositoryFixture(repository)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            stub(pr(117, repository: repository))
+            GitHubPullRequests.prime(repo: repository, branch: "ui/grid")
+            let turns = (0..<5).map {
+                HomeBase.Turn(at: Date(timeIntervalSince1970: 1_755_530_000 - Double($0) * 600),
+                              topic: "turn \($0)", happened: "Did it.", branch: "ui/grid")
+            }
+            let html = HomeBase.render(model(turns, cwd: directory.path))
+            XCTAssertEqual(html.components(separatedBy: "class=\"pr\"").count - 1, 1)
         }
-        let html = HomeBase.render(model(turns, cwd: cwd))
-        XCTAssertEqual(html.components(separatedBy: "class=\"pr\"").count - 1, 1)
     }
 
     // MARK: - "HEAD" is not a branch
